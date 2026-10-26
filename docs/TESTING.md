@@ -7,6 +7,7 @@ Automated checks run against synthetic data in temporary directories. Hardware e
 | Syntax, versions, repository hygiene | `npm run check` | All JS/MJS parses, metadata matches, common secret/private paths excluded, local Markdown links resolve |
 | Server and client regressions | `npm test`, Node 22.13+ | Real HTTP/TLS, pairing and authorization, quotas, resumable files, receipts, jobs, actual ArkTS business/BLE source with controlled radio, filesystem and HTTP adapters |
 | Swift protocol/state models | Included in `npm test` on macOS | Actual Swift framing and MTU reassembly; delta merge, durable action journal, missing/duplicate IDs, receipts, stale revision rejection |
+| Mac update installer | Included in `npm test` | App directory identity retained, backup copied, old contents restored on verification failure; does not simulate TCC policy |
 | Mac application | `npm run build:mac` then `codesign --verify --deep --strict dist/NearBridge.app` | Native source compiles for declared macOS 13 minimum; ad-hoc bundle signature validates |
 | HarmonyOS application | `npm run build:phone` | Strict ArkTS compilation with official SDK and local signing when configured |
 | Latency | `npm run benchmark` | Server mutation-to-observation over loopback HTTP/HTTPS; no real BLE latency claim |

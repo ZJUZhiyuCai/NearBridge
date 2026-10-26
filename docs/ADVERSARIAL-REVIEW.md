@@ -14,9 +14,10 @@ This is an internal review of reconnection, ambiguous side effects and automatic
 | An older server could ignore new idempotency fields | New reliable endpoints plus advertised capability; old servers cannot silently accept the new request shape |
 | A retry after re-pairing could target another device | Phone pairing-scope binding, Mac target binding, no startup replay; mismatched scopes/content reject before submission |
 | Automatic fallback could replay a mutation or change file routes between chunks | Anonymous pinned LAN probes, one shared route decision, no route change while requests/actions/transfers are active; pure BLE never probes LAN; late probes cannot override a manual choice |
+| Moving the old Mac app made its Bluetooth permission entry follow the backup | Reproduced in System Settings after the final install. Copy the backup, retain the installed app directory, verify signatures and roll back failed replacements; filesystem-identity/failure tests and a real signed-bundle replacement smoke test pass. Ad-hoc updates can still require OS reauthorization |
 | A corrupt/partially written local journal could mint a new ID | Atomic journal replacement, full UTF-8 writes with zero-write detection, fail-closed load and explicit inspect/end-retry controls |
 
-Local suite: 81 passing tests. Mac and HarmonyOS builds/signatures pass. Real-device scope: updated pairing/history retained, direct BLE reconnect, one independently verified phone workflow with receipt, Mac self-test file hash, and user confirmation of round-trip pass and automatic BLE fallback. Automatic LAN and full fault injection remain unverified on hardware. [Measurements](PERFORMANCE.md) explicitly record the small fsync cost instead of claiming every operation became faster.
+Local suite: 83 passing tests. Mac and HarmonyOS builds/signatures pass. Real-device scope: updated pairing/history retained, direct BLE reconnect, one independently verified phone workflow with receipt, Mac self-test file hash, and user confirmation of round-trip pass and automatic BLE fallback. Automatic LAN and full fault injection remain unverified on hardware. [Measurements](PERFORMANCE.md) explicitly record the small fsync cost instead of claiming every operation became faster.
 
 
 ## Second pass · 2026-10-26

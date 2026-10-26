@@ -6,7 +6,8 @@
 - Add automatic, Bluetooth-only and LAN-only connection modes. Automatic mode probes the pinned LAN endpoint before falling back to the selected BLE peer; transfers and actions keep their route until completion. Existing explicit choices survive upgrades.
 - Persist text/workflow operation IDs on both native clients before submission. A separate bounded server receipt ledger survives history deletion/trimming and restart; seven-day expiry rejects stale retries instead of executing them again. Failed commits roll back before side effects.
 - Add explicit “retry confirmation” and “end retry” controls. Bind pending actions to their original pairing; never replay workflows on app startup. Dedicated reliable endpoints prevent older servers from silently ignoring IDs.
-- Add radio-adapter, journal-recovery, transport-selection and real HTTP/TLS regressions. Native builds and 81 local tests pass; device evidence and remaining limits are recorded in [verification](docs/VERIFICATION.md).
+- Preserve the installed Mac app directory when updating; copy a recoverable backup instead of renaming the app and moving its OS permission entry to the backup. Verify staged/final bundles and restore old contents on replacement failure.
+- Add radio-adapter, journal-recovery, transport-selection and real HTTP/TLS regressions. Native builds and 83 local tests pass; device evidence and remaining limits are recorded in [verification](docs/VERIFICATION.md).
 
 Upgrade Mac first, then the phone. Basic BLE reconnect, workflow and 32 KB self-test passed on Mate 70 Pro+; automatic BLE fallback is user-confirmed. Automatic LAN selection, large-file throughput and the full fault matrix remain to be tested on hardware.
 

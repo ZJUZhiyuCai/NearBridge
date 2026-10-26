@@ -50,7 +50,7 @@ npm run build:mac
 npm run install:mac
 ```
 
-安装到 `~/Applications/NearBridge.app`。旧 App 会保留为同目录隐藏备份，用户数据不会清除。Mac 产物使用本机 ad-hoc 签名，尚未提供公证后的通用安装包。
+安装到 `~/Applications/NearBridge.app`。旧 App 会复制到同目录隐藏备份，更新保留原应用目录身份，用户数据不会清除。安装前先退出 App；本机 ad-hoc 签名的更新仍可能需要 macOS 重新确认权限。Mac 产物使用本机 ad-hoc 签名，尚未提供公证后的通用安装包。
 
 ### HarmonyOS
 

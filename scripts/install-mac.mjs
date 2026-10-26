@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { replaceMacApp } from "./replace-mac-app.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const source = path.join(root, "dist/NearBridge.app");
@@ -23,15 +24,7 @@ if (fs.existsSync(target)) {
   if (id !== "local.nearbridge.mac")
     throw new Error("目标位置不是 NearBridge，已保留原应用。");
 }
-const staging = path.join(directory, `.NearBridge-${Date.now()}.app`);
-fs.cpSync(source, staging, { recursive: true, dereference: true });
-execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", staging]);
-if (fs.existsSync(target))
-  fs.renameSync(
-    target,
-    path.join(directory, `.NearBridge-backup-${Date.now()}.app`),
-  );
-fs.renameSync(staging, target);
+replaceMacApp(source, target, app => execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", app]));
 execFileSync(
   "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
   ["-f", target],
