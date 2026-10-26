@@ -5,6 +5,8 @@
 - `npm test`：44 项通过、0 失败、0 跳过。覆盖 HTTP/TLS、真实 Swift BLE 帧编码、实际 ArkTS 业务源码（平台 API 为内存适配器）；新增慢请求过期、会话轮换、通知连接上限、长中文文件名、回执重试、重复接收与后台请求取消等回归。
 - `npm run check`、`git diff --check`：通过。检查所有 JS/MJS 语法、版本一致性、仓库私有路径/常见凭据和本地文档链接。
 - `npm run build:mac`、严格签名校验：通过。`vtool -show-build` 核对 Mach-O 的 `minos 13.0`，不只是 Info.plist 声明。
+- Mac 0.4 已覆盖安装并运行，原配对、10 条历史及设置保持一致。通过本机 API 触发“打开收件目录”后，原生界面无需手动刷新即新增完成记录；该测试不是手机触发验证。
+- 首次远端 macOS CI 编译及 44 项测试通过，但严格签名失败。用本机 DevEco 自带 Node 24 复现：复制 npm `.bin/qrcode` 时生成了指向源码目录的绝对符号链接。打包已排除不需要的 CLI shims，并拒绝运行时中的残留符号链接；保留严格签名检查。
 - `npm run build:phone`：严格 ArkTS 编译、打包、SignHap 通过。版本 `0.4.0 / 400`；本机更新包 `dist/NearBridge-0.4.0.hap`，SHA-256 `3420c7b87402411eebd75e06fecbc62115e63f43cfe409dc4ca394b28ef1ed63`。原有 SDK 潜在异常/权限兼容性警告仍保留，没有关闭检查。
 - `npm audit --omit=dev --audit-level=high`：0 vulnerabilities（本轮观测）。
 - 本机回环 HTTP/HTTPS 基准：Mac 状态可见延迟 p50 从 1001.16 ms 降到 0.98 ms；手机协议观察端从 1502.81 ms 降到 1.44 ms。各 6 个样本，非真机/无线性能；完整环境、边界和原始合成数据见 [性能记录](PERFORMANCE.md)。

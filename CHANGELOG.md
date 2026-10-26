@@ -21,6 +21,7 @@
 - MIT license, contributor/security policies, issue and PR templates, code ownership, architecture/protocol/testing documents, and reproducible latency benchmark.
 - CI for Node 22/24/26 on Linux plus Swift compilation and signature validation on macOS. Actions are pinned to verified commit SHAs and receive read-only repository permissions.
 - Centralized server/Mac version metadata, full JavaScript syntax checks, version checks, tracked-secret/path checks, and local documentation-link validation.
+- Exclude npm CLI shims from the Mac runtime and reject leftover symlinks; Node 24 builds now retain strict bundle-signature validation.
 
 Phone hardware latency, BLE throughput, and 0.4 device fault recovery remain pending. See the [test matrix](docs/TESTING.md).
 

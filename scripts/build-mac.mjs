@@ -16,7 +16,14 @@ for (const name of ["src", "public", "node_modules"]) {
   fs.cpSync(path.join(root, name), target, {
     recursive: true,
     dereference: true,
+    // npm CLI shims are not used by the embedded service. Node 24 can preserve
+    // these as absolute links despite dereference, which strict codesign rejects.
+    filter: (source) => name !== "node_modules" || path.basename(source) !== ".bin",
   });
+}
+for (const entry of fs.readdirSync(bundle, { recursive: true })) {
+  if (fs.lstatSync(path.join(bundle, entry)).isSymbolicLink())
+    throw new Error(`应用运行时中出现符号链接，请先检查打包输入：${entry}`);
 }
 for (const name of ["package.json", "package-lock.json"])
   fs.copyFileSync(path.join(root, name), path.join(bundle, name));

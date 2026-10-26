@@ -15,6 +15,7 @@ Review date: 2026-10-26. Scope: local Node service, native client state/transfer
 | Lifecycle waits and stale snapshots | A stopped phone request could occupy synchronization for up to its timeout; late state could replace a newer snapshot | Destroy pending HTTP tasks, separate connection epochs, reject older same-epoch revisions; tests exercise cancellation and reordered responses |
 | Duplicate receive / false failure after save | Manual and automatic receive could write the same file; a lost receipt made a valid file look failed | Per-item in-flight deduplication and receipt-only retry; tests verify one download, preserved bytes/hash, and eventual completed state |
 | Zero-progress write loop | Storage returning zero bytes could spin without progressing | Fail the receive explicitly, with no false receipt; platform-adapter regression reproduces the zero write |
+| Nonportable Mac bundle links | Node 24 preserved the npm CLI shim as an absolute link into the source checkout, failing strict codesign | Reproduced on CI and locally with Node 24; omit unused CLI shims and reject remaining runtime symlinks |
 
 Before fixes, the first four targeted tests (filename, missing changes contract, retained SSE, observer cap) failed. The baseline failure output remains in local ignored diagnostics; no personal runtime log was uploaded. Existing TLS/authorization/quota/transfer tests remained enabled.
 
