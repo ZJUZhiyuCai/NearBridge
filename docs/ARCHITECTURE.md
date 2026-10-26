@@ -20,6 +20,7 @@ The web fallback uses HTTPS 53319. Only the Mac admin interface can approve pair
 | Location | Responsibility |
 | --- | --- |
 | `src/server.mjs` | HTTP routing, authentication, pairing, bounded observers, state revision and delivery |
+| `src/state-feed.mjs` | Credential-scoped revision manifests, bounded history, optional item deltas and snapshot fallback |
 | `src/store.mjs`, `src/transfers.mjs` | Index, filenames, quotas, persistent upload offsets, SHA-256 and receipts |
 | `src/workflows.mjs`, `src/system.mjs` | Enabled workflow IDs, idempotent jobs, argument-array OS calls |
 | `src/certificate.mjs` | Private CA, pinned server key, local address certificate renewal |
@@ -37,13 +38,19 @@ Native clients reject lower revisions from the same server epoch. Phone file rec
 
 Old clients can continue polling `/api/state`; new clients detect servers without revisions and retain the earlier polling fallback. The existing web client continues using bounded SSE notifications.
 
+Version 0.5 clients opt into `mode=delta-v1`. A changed response contains either a full snapshot or a delta against the exact requested revision. Deltas carry changed items, removed IDs, optional ordering and current metadata. Each role retains at most 32 ID/hash manifests; a credential change discards that role's old baselines. Older text bodies are not copied into the baseline cache. Unknown, evicted or more expensive deltas fall back to snapshots. Both clients validate merges before replacing visible state and bootstrap again on a mismatch.
+
+History snapshots contain at most 200 items and 8 MiB of encoded item JSON, whichever comes first. This bounds even heavily escaped valid text below the phone's 20 MiB response limit. Individual texts remain intact; all stored items still count toward the 1000-item quota.
+
 ## File lifecycle
 
 1. Reserve a UUID, name and size; reserved bytes count against quota.
-2. Commit each expected-offset chunk. Write and fsync file data before advancing the persisted offset.
+2. Commit each expected-offset chunk. Asynchronously write and fsync file data, recheck authorization, then persist and publish the offset. A slow fsync yields to other HTTP requests; zero-progress writes and failed metadata commits never advance the offset.
 3. Hash the completed upload, then add it to the Mac inbox/outbox. Repeating completion returns the same item.
 4. Phone downloads use byte ranges and private `.part` files. Verify the complete SHA-256 before renaming and recording the file.
 5. Phone acknowledges the verified hash. If only this acknowledgement fails, keep the local file and retry the receipt without downloading again.
+
+Duplicate receipts return success without another index write or notification. Revocation/credential rotation aborts active downloads; expiry is checked by the one-second presence timer. Bytes already delivered or queued by the network cannot be recalled.
 
 These operations support process-interruption recovery; full sudden-power-loss durability across every filesystem metadata write has not been verified. Files and text have no application-level at-rest encryption.
 

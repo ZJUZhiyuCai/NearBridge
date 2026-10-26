@@ -198,12 +198,59 @@ test("changes polling sends a revision and keeps history when the heartbeat has 
     { revision: "boot.7", name: "Mac", items: [], workflows: [], jobs: [] });
   await f.client.refresh();
   f.client.start();
-  assert.match(f.requests[1].url, /\/api\/changes\?since=boot.7$/);
+  assert.match(f.requests[1].url, /\/api\/changes\?since=boot.7&mode=delta-v1$/);
   const previous = f.storage.get("stateJSON");
   finish({ revision: "boot.7" });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.storage.get("stateJSON"), previous);
   assert.equal(f.storage.get("linkPhase"), "online");
+  f.client.stop();
+});
+
+test("phone delta application preserves unchanged text, applies receipts, removes records and restores order", { skip }, async () => {
+  const original = { revision: "boot.1", name: "Mac", items: [
+    { id: "a", kind: "text", source: "mac", text: "preserve me", createdAt: "test" },
+    { id: "b", kind: "text", source: "mac", text: "delete me", createdAt: "test" }
+  ], workflows: [], jobs: [] };
+  const f = fixture(async () => original);
+  await f.client.refresh();
+  f.client.applyUpdate({ revision: "boot.3", delta: { baseRevision: "boot.1", removed: ["b"], order: ["c", "a"],
+    state: { ...original, revision: "boot.3", items: [{ id: "c", kind: "text", source: "mac", text: "new", createdAt: "test" }], jobs: [{ id: "job", status: "succeeded" }] } } });
+  let state = JSON.parse(f.storage.get("stateJSON"));
+  assert.deepEqual(state.items.map(item => item.id), ["c", "a"]);
+  assert.equal(state.items[1].text, "preserve me");
+  assert.equal(state.jobs[0].status, "succeeded");
+  const prior = f.storage.get("stateJSON");
+  f.client.applyUpdate({ revision: "boot.2", delta: { baseRevision: "boot.1" } });
+  assert.equal(f.storage.get("stateJSON"), prior, "a late older delta must not overwrite a newer snapshot");
+  f.client.applyUpdate({ revision: "boot.4", delta: { baseRevision: "boot.3", removed: [],
+    state: { ...state, revision: "boot.4", items: [{ ...state.items[1], receivedAt: "now" }] } } });
+  state = JSON.parse(f.storage.get("stateJSON"));
+  assert.deepEqual(state.items.map(item => item.id), ["c", "a"]);
+  assert.equal(state.items[1].receivedAt, "now");
+});
+
+test("phone rejects incomplete or stale-base deltas atomically and can bootstrap after a failed sync", { skip }, async () => {
+  const original = { revision: "boot.1", name: "Mac", items: [{ id: "a", text: "keep" }], workflows: [], jobs: [] };
+  const f = fixture(async () => original);
+  await f.client.refresh();
+  const before = f.storage.get("stateJSON");
+  const next = { ...original, revision: "boot.2", items: [] };
+  for (const delta of [
+    { baseRevision: "wrong", state: next, removed: [] },
+    { baseRevision: "boot.1", state: next, removed: [], order: ["missing"] },
+    { baseRevision: "boot.1", state: next, removed: [], order: ["a", "a"] },
+    { baseRevision: "boot.1", state: next, removed: ["missing"] },
+  ]) {
+    assert.throws(() => f.client.applyUpdate({ revision: "boot.2", delta }));
+    assert.equal(f.storage.get("stateJSON"), before);
+    assert.equal(f.client.revision, "boot.1");
+  }
+  f.client.json = async () => ({ revision: "boot.2", delta: { baseRevision: "lost", state: next, removed: [] } });
+  f.client.discover = () => {}; // This test targets merge recovery, not mDNS timers.
+  f.client.active = true;
+  await f.client.tick();
+  assert.equal(f.client.revision, "", "a failed merge must trigger a full bootstrap on retry");
   f.client.stop();
 });
 

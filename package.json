@@ -1,6 +1,6 @@
 {
   "name": "nearbridge",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "A local, personal bridge between Mac and HarmonyOS.",
@@ -13,6 +13,7 @@
     "test": "node --test tests/*.test.mjs",
     "check": "node scripts/check.mjs",
     "benchmark": "node scripts/benchmark.mjs",
+    "benchmark:active": "node scripts/benchmark-active.mjs",
     "build:mac": "node scripts/build-mac.mjs",
     "build:phone": "node scripts/build-harmony.mjs",
     "phone:tools": "node scripts/deveco-harmony.mjs",

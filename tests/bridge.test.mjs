@@ -183,6 +183,115 @@ test("changes: notifications wake immediately, idle replies omit history, stale 
   assert.equal((await request("phone", "/api/changes")).status, 401);
 });
 
+function mergeUpdate(previous, update) {
+  if (update.state) return update.state;
+  const { delta } = update;
+  assert.equal(delta.baseRevision, previous.revision);
+  const items = new Map(previous.items.map(item => [item.id, item]));
+  delta.removed.forEach(id => items.delete(id));
+  delta.state.items.forEach(item => items.set(item.id, item));
+  const order = delta.order || previous.items.map(item => item.id);
+  assert.equal(order.length, items.size);
+  return { ...delta.state, items: order.map(id => { assert.ok(items.has(id)); return items.get(id); }) };
+}
+
+test("delta: missed updates, receipts, deletion and the 200-item window reconstruct the exact authorized snapshot", async (t) => {
+  const { bridge, request, pair } = await fixture(t);
+  const cookie = await pair();
+  for (let i = 0; i < 202; i++) bridge.store.addText(`history-${i}-${"x".repeat(1024)}`, "mac", bridge.store.data.device.id);
+  let previous = (await request("phone", "/api/state", { cookie })).json;
+  const oldest = previous.items.at(-1).id;
+  const first = (await request("mac", "/api/items", { method: "POST", body: { text: "first new item" } })).json.item;
+  await request("mac", "/api/items", { method: "POST", body: { text: "second new item" } });
+  let reply = await request("phone", `/api/changes?mode=delta-v1&since=${previous.revision}`, { cookie });
+  assert.ok(reply.json.delta, "large unchanged histories must not be retransmitted");
+  assert.equal(reply.json.delta.state.items.length, 2);
+  assert.ok(reply.json.delta.removed.includes(oldest));
+  assert.ok(reply.buffer.length < 15000);
+  previous = mergeUpdate(previous, reply.json);
+  assert.deepEqual(previous, (await request("phone", "/api/state", { cookie })).json);
+  await request("phone", `/api/items/${first.id}/received`, { cookie, method: "POST", body: {} });
+  reply = await request("phone", `/api/changes?mode=delta-v1&since=${previous.revision}`, { cookie });
+  assert.equal(reply.json.delta.order, undefined, "unchanged order should cost no repeated ID list");
+  assert.equal(reply.json.delta.state.items.length, 1);
+  previous = mergeUpdate(previous, reply.json);
+  await request("mac", `/api/items/${first.id}`, { method: "DELETE" });
+  reply = await request("phone", `/api/changes?mode=delta-v1&since=${previous.revision}`, { cookie });
+  previous = mergeUpdate(previous, reply.json);
+  assert.deepEqual(previous, (await request("phone", "/api/state", { cookie })).json);
+  assert.equal(previous.items.length, 200);
+  assert.ok(!previous.items.some(item => item.id === first.id));
+  assert.equal((await request("phone", "/api/changes?mode=delta-v1&since=unknown.1", { cookie })).json.delta, undefined);
+  assert.ok((await request("phone", "/api/changes?since=unknown.1", { cookie })).json.state, "old clients retain the snapshot contract");
+});
+
+test("adversarial: repeated valid receipts do not write or wake state observers again", async (t) => {
+  const { request, pair } = await fixture(t);
+  const cookie = await pair();
+  const item = (await request("mac", "/api/items", { method: "POST", body: { text: "once" } })).json.item;
+  const receipt = () => request("phone", `/api/items/${item.id}/received`, { cookie, method: "POST", body: {} });
+  await receipt();
+  const before = (await request("phone", "/api/state", { cookie })).json;
+  await receipt();
+  const after = (await request("phone", "/api/state", { cookie })).json;
+  assert.equal(after.revision, before.revision);
+  assert.equal(after.items[0].receivedAt, before.items[0].receivedAt);
+});
+
+test("adversarial: a failed receipt commit is rolled back and a retry persists it", async t => {
+  const { request, pair, bridge } = await fixture(t);
+  const cookie = await pair();
+  const item = (await request("mac", "/api/items", { method: "POST", body: { text: "commit the receipt" } })).json.item;
+  const save = bridge.store.save.bind(bridge.store);
+  bridge.store.save = () => { throw Object.assign(new Error("disk full"), { status: 507 }); };
+  const receipt = () => request("phone", `/api/items/${item.id}/received`, { cookie, method: "POST", body: {} });
+  assert.equal((await receipt()).status, 507);
+  assert.equal(bridge.store.data.items[0].receivedAt, undefined, "a failed save must not create a false idempotency marker");
+  bridge.store.save = save;
+  assert.equal((await receipt()).status, 200);
+  assert.ok(JSON.parse(fs.readFileSync(bridge.store.indexPath)).items[0].receivedAt);
+});
+
+test("adversarial: an offline pairing expiry invalidates the cached Mac snapshot", async t => {
+  const { request, pair, bridge } = await fixture(t);
+  await pair(); // No authenticated phone traffic: the paired device stays offline.
+  const before = (await request("mac", "/api/state")).json;
+  assert.equal(before.paired, true);
+  assert.equal(before.device.connected, false);
+  bridge.store.data.device.expiresAt = Date.now() + 20;
+  const update = (await request("mac", `/api/changes?since=${before.revision}&wait=1500`)).json;
+  assert.equal(update.state?.paired, false);
+  assert.equal((await request("mac", "/api/state")).json.paired, false);
+});
+
+test("adversarial: revoking a device terminates an already streaming download", async (t) => {
+  const { request, pair, bridge, urls } = await fixture(t);
+  const cookie = await pair();
+  const bytes = Buffer.alloc(16 * 1024 * 1024, 123);
+  const temp = path.join(bridge.store.staging, `${randomUUID()}.part`);
+  fs.writeFileSync(temp, bytes);
+  const item = bridge.store.addFile(temp, { name: "slow-reader.bin", size: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"), source: "mac", peerId: bridge.store.data.device.id });
+  let response, received = 0, stopped = false;
+  let firstChunk;
+  const started = new Promise(resolve => { firstChunk = resolve; });
+  const complete = new Promise((resolve, reject) => {
+    const req = https.get(new URL(`/api/files/${item.id}`, urls.phone), { ca: tls.cert, headers: { Cookie: cookie } }, res => {
+      response = res;
+      res.on("data", chunk => { received += chunk.length; if (!stopped) { stopped = true; res.pause(); firstChunk(); } });
+      res.on("error", () => resolve());
+      res.on("end", resolve);
+    });
+    req.on("error", reject); t.after(() => req.destroy());
+  });
+  await started;
+  await request("mac", "/api/device/revoke", { method: "POST", body: {} });
+  response.resume();
+  await complete;
+  assert.ok(response.aborted, "an old authorized response must not remain readable after revocation");
+  assert.ok(received < bytes.length);
+});
+
 test("adversarial: session rotation closes old SSE streams even when the device ID is retained", async (t) => {
   const { request, pair, urls, bridge } = await fixture(t);
   const cookie = await pair();

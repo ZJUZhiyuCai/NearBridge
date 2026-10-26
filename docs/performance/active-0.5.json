@@ -1,0 +1,169 @@
+{
+  "node": "v26.12.1",
+  "platform": "darwin/arm64",
+  "observedAt": "2026-10-26T08:52:00.288Z",
+  "history": "200 synthetic text items, each 8 KiB; bounded window rolls as new items arrive",
+  "transport": "verified HTTPS on loopback; no phone, BLE radio or UI rendering",
+  "scenarios": {
+    "workflow": {
+      "fullBytes": {
+        "samples": [
+          1673896,
+          1674209,
+          1674522,
+          1674837,
+          1675150,
+          1675463
+        ],
+        "p50": 1674522,
+        "p95": 1675463
+      },
+      "deltaBytes": {
+        "samples": [
+          1176,
+          1489,
+          1802,
+          2117,
+          2431,
+          2744
+        ],
+        "p50": 1802,
+        "p95": 2744
+      },
+      "reductionPercent": 99.89,
+      "requestMs": {
+        "full": {
+          "samples": [
+            5.15,
+            3.21,
+            5.32,
+            3.27,
+            4.08,
+            3.04
+          ],
+          "p50": 3.27,
+          "p95": 5.32
+        },
+        "delta": {
+          "samples": [
+            0.68,
+            2,
+            0.47,
+            1.36,
+            0.23,
+            3.04
+          ],
+          "p50": 0.68,
+          "p95": 3.04
+        }
+      }
+    },
+    "receipt": {
+      "fullBytes": {
+        "samples": [
+          1675503,
+          1675543,
+          1675583,
+          1675623,
+          1675663,
+          1675703
+        ],
+        "p50": 1675583,
+        "p95": 1675703
+      },
+      "deltaBytes": {
+        "samples": [
+          11147,
+          11147,
+          11147,
+          11147,
+          11147,
+          11147
+        ],
+        "p50": 11147,
+        "p95": 11147
+      },
+      "reductionPercent": 99.33,
+      "requestMs": {
+        "full": {
+          "samples": [
+            4.53,
+            3.12,
+            5.43,
+            2.91,
+            5.87,
+            2.91
+          ],
+          "p50": 3.12,
+          "p95": 5.87
+        },
+        "delta": {
+          "samples": [
+            0.31,
+            1.2,
+            0.33,
+            1.2,
+            0.34,
+            1.32
+          ],
+          "p50": 0.34,
+          "p95": 1.32
+        }
+      }
+    },
+    "newText": {
+      "fullBytes": {
+        "samples": [
+          1667527,
+          1659351,
+          1651175,
+          1642999,
+          1634823,
+          1626647
+        ],
+        "p50": 1642999,
+        "p95": 1667527
+      },
+      "deltaBytes": {
+        "samples": [
+          10779,
+          10779,
+          10779,
+          10779,
+          10779,
+          10779
+        ],
+        "p50": 10779,
+        "p95": 10779
+      },
+      "reductionPercent": 99.34,
+      "requestMs": {
+        "full": {
+          "samples": [
+            4.52,
+            4.67,
+            5.17,
+            3.25,
+            4.02,
+            3.29
+          ],
+          "p50": 4.02,
+          "p95": 5.17
+        },
+        "delta": {
+          "samples": [
+            0.26,
+            1.62,
+            0.3,
+            1.12,
+            0.3,
+            1.44
+          ],
+          "p50": 0.3,
+          "p95": 1.62
+        }
+      }
+    }
+  },
+  "note": "Response-body bytes only. Request timing includes server serialization and response parsing but excludes mutation, rendering, radio and TLS setup. Six samples per case; not a hardware latency/throughput claim."
+}

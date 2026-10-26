@@ -21,6 +21,7 @@ export class BridgeClient {
   private active: boolean = false;
   private syncing: boolean = false;
   private revision: string = '';
+  private state?: BridgeState;
   private syncFailures: number = 0;
   private requests: Set<http.HttpRequest> = new Set();
   private receiving: Map<string, Promise<void>> = new Map();
@@ -231,8 +232,41 @@ export class BridgeClient {
     const nextParts = next.split('.');
     if (next && nextParts[0] === previousParts[0] && Number(nextParts[1]) < Number(previousParts[1])) return;
     this.revision = next;
+    this.state = state;
     const encoded = JSON.stringify(state);
     if (encoded !== AppStorage.get<string>('stateJSON')) AppStorage.setOrCreate('stateJSON', encoded);
+  }
+  private applyUpdate(update: StateUpdate): void {
+    if (update.state) { this.applyState(update.state); return; }
+    const delta = update.delta;
+    if (!delta) return; // An idle heartbeat must not clear history.
+    const before = this.revision.split('.');
+    const after = update.revision.split('.');
+    if (update.revision === this.revision || (before[0] === after[0] && Number(after[1]) < Number(before[1]))) return;
+    const previous = this.state;
+    if (!previous || delta.baseRevision !== this.revision || delta.state.revision !== update.revision) throw new Error('同步基线已改变，正在重新获取状态');
+    const items: Map<string, BridgeItem> = new Map();
+    previous.items.forEach((item: BridgeItem) => { items.set(item.id, item); });
+    const removed: Set<string> = new Set(delta.removed);
+    const changed: Set<string> = new Set();
+    for (const id of delta.removed) {
+      if (!items.delete(id)) throw new Error('同步删除记录无效');
+    }
+    for (const item of delta.state.items) {
+      if (changed.has(item.id) || removed.has(item.id)) throw new Error('同步记录重复');
+      changed.add(item.id); items.set(item.id, item);
+    }
+    const order = delta.order || previous.items.map((item: BridgeItem) => item.id);
+    if (order.length > 200 || order.length !== items.size || new Set(order).size !== order.length) throw new Error('同步顺序不完整');
+    const ordered: BridgeItem[] = [];
+    for (const id of order) {
+      const item = items.get(id);
+      if (!item) throw new Error('同步记录缺失');
+      ordered.push(item);
+    }
+    const next = delta.state;
+    next.items = ordered;
+    this.applyState(next);
   }
   private connectionReady(): void {
     this.sessionRejected = false;
@@ -246,9 +280,9 @@ export class BridgeClient {
     let delay = 0;
     try {
       if (this.revision) {
-        const update = await this.json<StateUpdate>(`/api/changes?since=${encodeURIComponent(this.revision)}`);
+        const update = await this.json<StateUpdate>(`/api/changes?since=${encodeURIComponent(this.revision)}&mode=delta-v1`);
         if (epoch !== this.connectionEpoch || !this.active) return;
-        if (update.state) this.applyState(update.state);
+        this.applyUpdate(update);
         this.connectionReady();
       } else {
         await this.refresh();

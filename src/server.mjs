@@ -18,6 +18,7 @@ import { macSystem } from "./system.mjs";
 import { WorkflowManager } from "./workflows.mjs";
 import { TransferManager } from "./transfers.mjs";
 import { VERSION } from "./version.mjs";
+import { StateFeed } from "./state-feed.mjs";
 
 const PUBLIC = fileURLToPath(new URL("../public/", import.meta.url));
 const SESSION_MS = 30 * 86400000;
@@ -31,8 +32,12 @@ const equal = (a, b) =>
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 function json(res, status, data) {
+  encodedJSON(res, status, JSON.stringify(data));
+}
+
+function encodedJSON(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(data));
+  res.end(data);
 }
 
 async function readJSON(req) {
@@ -70,6 +75,8 @@ export function createBridge(options) {
   const store = new Store(dataDir, inbox);
   const clients = new Map();
   const waiters = new Map();
+  const downloads = new Set();
+  const feed = new StateFeed();
   const instance = randomUUID();
   let sequence = 0;
   const revision = () => `${instance}.${sequence}`;
@@ -85,6 +92,7 @@ export function createBridge(options) {
   let closing = false;
   let phoneLastSeen = 0;
   let wasConnected = false;
+  let wasPaired = Boolean(store.data.device && store.data.device.expiresAt > Date.now());
   let pendingVisible = false;
   const workflows = new WorkflowManager(store, system, broadcast, hasRoom);
   const transfers = new TransferManager(store, {
@@ -95,6 +103,8 @@ export function createBridge(options) {
 
   function broadcast() {
     sequence++;
+    wasPaired = Boolean(store.data.device && store.data.device.expiresAt > Date.now());
+    for (const download of downloads) if (!download.valid()) download.abort.abort();
     for (const [res, client] of clients) {
       if (!client.valid()) { res.end(); continue; }
       // A stalled reader must not accumulate an unbounded notification queue.
@@ -174,7 +184,7 @@ export function createBridge(options) {
         .filter((job) => role === "mac" || job.peerId === device?.id)
         .slice(0, 20)
         .map(({ requestId, ...job }) => job),
-      settings: role === "mac" ? store.data.settings : undefined,
+      settings: role === "mac" ? { ...store.data.settings } : undefined,
       pending:
         role === "mac" &&
         pending?.status === "pending" &&
@@ -387,9 +397,12 @@ export function createBridge(options) {
         throw fail(404, "记录不存在");
       if (item.kind === "file" && body.sha256 !== item.sha256)
         throw fail(409, "文件校验失败，请重新接收");
-      item.receivedAt ||= new Date().toISOString();
-      store.save();
-      broadcast();
+      if (!item.receivedAt) {
+        item.receivedAt = new Date().toISOString();
+        try { store.save(); }
+        catch (error) { delete item.receivedAt; throw error; }
+        broadcast();
+      }
       json(res, 200, { ok: true });
       return;
     }
@@ -432,7 +445,7 @@ export function createBridge(options) {
     }
 
     if (method === "GET" && pathname === "/api/state") {
-      json(res, 200, state(role, device));
+      json(res, 200, feed.snapshot(role, device?.tokenHash || "mac", revision(), () => state(role, device)));
       return;
     }
     if (method === "GET" && pathname === "/api/changes") {
@@ -440,8 +453,10 @@ export function createBridge(options) {
       if (!/^\d+$/.test(rawWait) || Number(rawWait) < 1 || Number(rawWait) > 25000)
         throw fail(400, "等待时间无效");
       const since = url.searchParams.get("since");
+      const update = () => feed.update(role, device?.tokenHash || "mac", revision(), () => state(role, device), since,
+        url.searchParams.get("mode") === "delta-v1");
       if (since !== revision()) {
-        json(res, 200, { revision: revision(), state: state(role, device) });
+        encodedJSON(res, 200, update());
         return;
       }
       observerRoom(role);
@@ -453,7 +468,8 @@ export function createBridge(options) {
         try {
           authorize(); // Recheck the exact credential, including same-device rotation.
           if (role === "phone") phoneLastSeen = Date.now();
-          json(res, 200, { revision: revision(), ...(changed ? { state: state(role, device) } : {}) });
+          if (changed) encodedJSON(res, 200, update());
+          else json(res, 200, { revision: revision() });
         } catch (error) { json(res, error.status || 500, { error: error.message }); }
       };
       waiters.set(res, { role, valid: () => role === "mac" || Boolean(deviceFor(req)), finish });
@@ -604,8 +620,8 @@ export function createBridge(options) {
         if (info.role === "phone") client.end();
       for (const upload of uploads)
         if (upload.role === "phone") upload.abort.abort();
-      await workflows.close();
       broadcast();
+      await workflows.close();
       json(res, 200, { ok: true });
       return;
     }
@@ -729,8 +745,12 @@ export function createBridge(options) {
         ETag: `"${item.sha256}"`,
         "Content-Disposition": `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(item.name)}`,
       });
-      if (size) await pipeline(fs.createReadStream(file, { start, end }), res);
-      else res.end();
+      if (size) {
+        const download = { valid: () => role === "mac" || Boolean(deviceFor(req)), abort: new AbortController() };
+        downloads.add(download);
+        try { await pipeline(fs.createReadStream(file, { start, end }), res, { signal: download.abort.signal }); }
+        finally { downloads.delete(download); }
+      } else res.end();
       return;
     }
     if (method === "DELETE" && pathname.startsWith("/api/items/")) {
@@ -850,9 +870,11 @@ export function createBridge(options) {
   cleanup.unref();
   const presence = setInterval(() => {
     const connected = phoneConnected();
+    const paired = Boolean(store.data.device && store.data.device.expiresAt > Date.now());
     const visible = Boolean(pending?.status === "pending" && pending.expiresAt > Date.now());
     const expiredObserver = [...clients.values(), ...waiters.values()].some(client => !client.valid());
-    if (connected !== wasConnected || visible !== pendingVisible || expiredObserver) {
+    const expiredDownload = [...downloads].some(download => !download.valid());
+    if (paired !== wasPaired || connected !== wasConnected || visible !== pendingVisible || expiredObserver || expiredDownload) {
       wasConnected = connected; pendingVisible = visible; broadcast();
     }
   }, 1000);
@@ -907,6 +929,7 @@ export function createBridge(options) {
       for (const waiter of [...waiters.values()]) waiter.finish(false);
       for (const [res] of clients) res.end();
       for (const upload of uploads) upload.abort.abort();
+      for (const download of downloads) download.abort.abort();
       await workflows.close();
       await Promise.all(
         servers.map(
