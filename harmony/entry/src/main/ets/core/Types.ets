@@ -12,7 +12,8 @@ export interface BridgeItem {
 export interface Workflow { id: string; name: string; description: string; enabled: boolean; }
 export interface Job { id: string; name: string; status: string; message: string; }
 export interface BridgeState { revision?: string; name: string; items: BridgeItem[]; workflows: Workflow[]; jobs: Job[]; }
-export interface StateUpdate { revision: string; state?: BridgeState; }
+export interface StateDelta { baseRevision: string; state: BridgeState; removed: string[]; order?: string[]; }
+export interface StateUpdate { revision: string; state?: BridgeState; delta?: StateDelta; }
 export interface PairClaim { id: string; claim: string; }
 export interface PairStatus { status: string; session?: string; }
 export interface TransferReply { id: string; offset: number; size: number; chunkSize: number; item?: BridgeItem; }

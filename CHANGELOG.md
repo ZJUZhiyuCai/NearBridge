@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — 2026-10-26
+
+- Optional item deltas for both native clients: changed items, removals and ordering, with exact-baseline validation and full-snapshot fallback. Older clients keep their existing protocol.
+- Credential-scoped baseline caches retain only bounded ID/hash manifests. Encoded history is capped at 8 MiB to prevent escaped text from exceeding the phone HTTP limit; individual text remains intact.
+- Asynchronous upload writes and fsync keep the event loop available. Recheck authorization after disk I/O; zero writes and failed metadata commits do not advance resumable offsets.
+- Abort already streaming downloads on revocation/credential rotation; check expiry each second. Duplicate valid receipts no longer write the index or wake observers again.
+- Roll back a receipt marker on persistence failure, and invalidate cached state when an offline pairing expires.
+- Add actual Swift and ArkTS delta regressions, streaming-revocation and controlled slow-disk cases, plus an isolated active-sync benchmark. See [review](docs/ADVERSARIAL-REVIEW.md) and [measurements](docs/PERFORMANCE.md).
+
+New phone hardware, BLE throughput and fault recovery remain pending.
+
 ## 0.4.0 — 2026-10-26
 
 ### Responsiveness

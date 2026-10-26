@@ -44,9 +44,9 @@ import UniformTypeIdentifiers
                 guard let self else { return }
                 do {
                     if let revision = self.state?.revision, self.serviceAvailable {
-                        let update = try await BridgeAPI.get("/api/changes?since=\(revision)", as: StateUpdate.self)
+                        let update = try await BridgeAPI.get("/api/changes?since=\(revision)&mode=delta-v1", as: StateUpdate.self)
                         try Task.checkCancellation()
-                        if let state = update.state { self.apply(state) }
+                        if let state = try update.resolving(self.state) { self.apply(state) }
                     } else {
                         let state = try await BridgeAPI.get("/api/state", as: BridgeState.self)
                         try Task.checkCancellation()

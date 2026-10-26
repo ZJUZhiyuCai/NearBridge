@@ -9,11 +9,12 @@ export const CHUNK_SIZE = 4 * 1024 * 1024;
 // A committed offset is durable. Extra bytes from an interrupted write are
 // truncated on restart, so retrying a chunk cannot silently duplicate bytes.
 export class TransferManager {
-  constructor(store, { maxFileSize, hasRoom, changed }) {
+  constructor(store, { maxFileSize, hasRoom, changed, io = fs.promises }) {
     this.store = store;
     this.maxFileSize = maxFileSize;
     this.hasRoom = hasRoom;
     this.changed = changed;
+    this.io = io;
     this.directory = path.join(store.directory, "transfers");
     fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     this.entries = new Map();
@@ -162,25 +163,27 @@ export class TransferManager {
       }
       if (size !== length) throw fail(400, "分块不完整，请重试");
       authorize();
-      const fd = fs.openSync(this.file(id), "r+");
+      const file = await this.io.open(this.file(id), "r+");
       try {
+        authorize();
         const buffer = Buffer.concat(chunks);
         let written = 0;
-        while (written < buffer.length)
-          written += fs.writeSync(
-            fd,
-            buffer,
-            written,
-            buffer.length - written,
-            offset + written,
-          );
-        fs.fsyncSync(fd);
+        while (written < buffer.length) {
+          const { bytesWritten } = await file.write(buffer, written, buffer.length - written, offset + written);
+          if (!Number.isInteger(bytesWritten) || bytesWritten <= 0 || bytesWritten > buffer.length - written)
+            throw fail(507, "磁盘写入中断，请检查剩余空间后重试");
+          written += bytesWritten;
+        }
+        // Keep fsync durability without blocking all HTTP/workflow traffic on
+        // the Node event loop. Revocation may happen while disk I/O is pending.
+        await file.sync();
+        authorize();
+        const next = { ...entry, offset: offset + size, updatedAt: Date.now() };
+        this.save(next);
+        Object.assign(entry, next); // Publish the offset only after metadata commits.
       } finally {
-        fs.closeSync(fd);
+        await file.close();
       }
-      entry.offset += size;
-      entry.updatedAt = Date.now();
-      this.save(entry);
       return this.view(entry);
     } finally {
       this.busy.delete(id);

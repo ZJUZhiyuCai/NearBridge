@@ -20,6 +20,8 @@ Include the affected commit, environment, smallest reproduction, expected author
 
 Each HTTP listener limits connections; notifications have per-role limits and close slow readers. Long-poll responses reauthorize at delivery. These bounds reduce resource exhaustion, but do not promise availability against a hostile network or radio peer. A BLE peer can still occupy the physical connection before application authentication.
 
+Incremental state baselines are credential-scoped and bounded; stale/unknown baselines fall back to an authorized snapshot. Revocation/rotation aborts active downloads, and expiry is checked once per second. Already transmitted bytes cannot be recalled. Asynchronous upload writes recheck authorization before committing offsets.
+
 The project does not implement Internet relay, unattended background phone operation, remote wake, or multi-user isolation. Do not expose the local admin port through a tunnel or reverse proxy.
 
 ## Verification

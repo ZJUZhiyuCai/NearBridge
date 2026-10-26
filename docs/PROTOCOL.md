@@ -31,6 +31,26 @@ Missing or different revisions get a current snapshot immediately. `wait` accept
 
 Sequence comparison applies only within the same server epoch. SSE `/api/events` remains available to the browser. Notifications carry no user data; the browser obtains a fresh authorized snapshot.
 
+### Optional item deltas (0.5)
+
+Append `&mode=delta-v1` to `/api/changes`. Older servers ignore the option and return their normal snapshot. The response is either the existing full/idle shape or:
+
+```json
+{
+  "revision": "epoch.12",
+  "delta": {
+    "baseRevision": "epoch.10",
+    "state": { "revision": "epoch.12", "items": [], "name": "Mac", "workflows": [], "jobs": [] },
+    "removed": [],
+    "order": ["item-id"]
+  }
+}
+```
+
+The example abbreviates `state` metadata. `delta.state` has the full current role-filtered metadata, but its `items` contains only new/changed items. Remove `removed` IDs, upsert changed items, then apply `order` when present; an omitted order retains the previous order. Validate the base revision, matching target revision, unique complete order and all referenced items **before** replacing visible state. Ignore already-applied/older same-epoch responses. On a mismatched or malformed delta, fetch `/api/state`; never partially apply it.
+
+Baselines are scoped by role and the current credential, with at most 32 ID/hash manifests per role. Unknown/evicted baselines and deltas larger than a snapshot return a full snapshot. Revoked credentials are rejected before constructing either response. No history bodies are retained in old baseline manifests. The history window is bounded by both 200 items and 8 MiB of encoded item JSON; individual text is never truncated. Window eviction/removal may reveal older items, which appear as ordinary upserts.
+
 ## Files
 
 - `POST /api/transfers`: `{ id: UUID, name, size }` reserves a transfer or returns its current offset / completed item.
@@ -40,9 +60,11 @@ Sequence comparison applies only within the same server epoch. SSE `/api/events`
 - `GET /api/files/:id`: authorized file download; supports one explicit byte range.
 - `POST /api/items/:id/received`: phone-only acknowledgement with the verified `sha256` for files.
 
-Limits: 512 MiB per file, 2 GiB stored/reserved files, 1000 items including pending reservations, 100 pending resumable transfers, at most three active resumable chunk/hash operations. The state snapshot exposes the newest 200 accessible items. Text is limited to 64 KiB UTF-8; JSON request bodies are also bounded.
+Limits: 512 MiB per file, 2 GiB stored/reserved files, 1000 items including pending reservations, 100 pending resumable transfers, at most three active resumable chunk/hash operations. The state snapshot exposes up to 200 newest accessible items within the encoded history budget. Text is limited to 64 KiB UTF-8; JSON request bodies are also bounded.
 
 Only the source role and paired device can access its in-progress transfer. Revocation removes that phone's unfinished uploads. A completed UUID cannot be reused with a different filename or size. Filename normalization removes path separators/control characters and reserves byte space for collision suffixes.
+
+Chunks use asynchronous file writes and fsync, with authorization rechecked before advancing persisted offsets. Repeating an already valid receipt is a no-op (the SHA-256 is still checked). Active downloads are aborted when authorization is revoked/rotated and within the one-second expiry sweep; bytes already sent may still be in flight.
 
 ## Workflows and retries
 
