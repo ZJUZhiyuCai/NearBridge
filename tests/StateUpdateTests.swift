@@ -37,6 +37,26 @@ import Foundation
             do { _ = try invalid.resolving(final) } catch { rejected = true }
             precondition(rejected)
         }
-        print("Native snapshot/delta merge, order, deletion, receipt and recovery vectors passed")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = ActionJournal(url: directory.appendingPathComponent("action.json"))
+        let action = try journal.prepare(kind: "text", value: "一次发送", peerId: "phone")
+        let restarted = ActionJournal(url: journal.url)
+        let retry = try restarted.prepare(kind: "text", value: "一次发送", peerId: "phone")
+        precondition(action.requestId == retry.requestId && action.requestedAt == retry.requestedAt)
+        for (kind, value, peer) in [("text", "不同内容", "phone"), ("workflow", "open-inbox", "phone"), ("text", "一次发送", "different-phone")] {
+            var rejected = false
+            do { _ = try restarted.prepare(kind: kind, value: value, peerId: peer) } catch { rejected = true }
+            precondition(rejected)
+        }
+        try restarted.save([])
+        let nextAction = try restarted.prepare(kind: "text", value: "一次发送", peerId: "phone")
+        precondition(nextAction.requestId != action.requestId)
+        try Data("invalid json".utf8).write(to: journal.url)
+        var rejected = false
+        do { _ = try journal.prepare(kind: "text", value: "一次发送", peerId: "phone") } catch { rejected = true }
+        precondition(rejected)
+        print("Native delta merge and durable action journal recovery vectors passed")
     }
 }

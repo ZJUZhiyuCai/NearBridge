@@ -3,7 +3,7 @@ export interface PairingPayload {
   token: string; certificate: string; publicKeyHash: string;
 }
 export interface PairedMac {
-  name: string; url: string; session: string; certificate: string; publicKeyHash: string;
+  actionScope?: string; name: string; url: string; session: string; certificate: string; publicKeyHash: string;
 }
 export interface BridgeItem {
   id: string; kind: string; source: string; createdAt: string;
@@ -11,7 +11,9 @@ export interface BridgeItem {
 }
 export interface Workflow { id: string; name: string; description: string; enabled: boolean; }
 export interface Job { id: string; name: string; status: string; message: string; }
-export interface BridgeState { revision?: string; name: string; items: BridgeItem[]; workflows: Workflow[]; jobs: Job[]; }
+export interface Capabilities { reliableActions: number; }
+export interface PendingAction { requestId: string; requestedAt: number; scope: string; kind: string; value: string; }
+export interface BridgeState { capabilities?: Capabilities; revision?: string; name: string; items: BridgeItem[]; workflows: Workflow[]; jobs: Job[]; }
 export interface StateDelta { baseRevision: string; state: BridgeState; removed: string[]; order?: string[]; }
 export interface StateUpdate { revision: string; state?: BridgeState; delta?: StateDelta; }
 export interface PairClaim { id: string; claim: string; }

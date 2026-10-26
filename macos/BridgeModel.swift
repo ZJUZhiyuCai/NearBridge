@@ -18,6 +18,9 @@ import UniformTypeIdentifiers
     @Published var queue: [QueuedFile] = []
     @Published var packing = false
     @Published var busy = false
+    @Published var pendingAction: PendingAction?
+    @Published var actionSending = false
+    @Published var actionStorageError = false
     @Published var bluetoothStatus = "蓝牙未开启"
     @Published var bluetoothEnabled = false
     private let bluetooth = BluetoothBridge()
@@ -26,9 +29,12 @@ import UniformTypeIdentifiers
     private var worker: Task<Void, Never>?
     private let dataDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/NearBridge")
     private var queueFile: URL { dataDirectory.appendingPathComponent("native-queue.json") }
+    private var actionJournal: ActionJournal { ActionJournal(url: dataDirectory.appendingPathComponent("native-action.json")) }
 
     func start() {
         guard polling == nil else { return }
+        do { pendingAction = try actionJournal.load() }
+        catch { actionStorageError = true; self.error = "无法读取待确认操作。请先检查执行结果，再点“结束重试”。" }
         bluetooth.onStatus = { [weak self] status, enabled in
             self?.bluetoothStatus = status; self?.bluetoothEnabled = enabled
         }
@@ -105,12 +111,59 @@ import UniformTypeIdentifiers
         Task {
             defer { busy = false }
             do {
-                _ = try await BridgeAPI.request("/api/items", method: "POST", body: ["text": text])
+                try await performAction(kind: "text", value: text)
                 if draft == text { draft = "" }
                 showNotice("文字已加入手机收件箱")
                 await refresh()
             } catch { self.error = error.localizedDescription }
         }
+    }
+    func sendClipboard() {
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+            error = "剪贴板里没有文字或链接"; return
+        }
+        draft = text; sendText()
+    }
+    func runWorkflow(_ id: String) {
+        Task {
+            do { try await performAction(kind: "workflow", value: id); showNotice("已交给 Mac 执行") }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+    func retryPendingAction() {
+        guard let pending = pendingAction else { return }
+        Task {
+            do {
+                try await performAction(kind: pending.kind, value: pending.value)
+                if pending.kind == "text", draft == pending.value { draft = "" }
+                showNotice("Mac 已确认接收")
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+    func discardPendingAction() {
+        guard !actionSending else { return }
+        do { try actionJournal.save([]); pendingAction = nil; actionStorageError = false }
+        catch { self.error = error.localizedDescription }
+    }
+    private func performAction(kind: String, value: String) async throws {
+        guard !actionSending else { throw BridgeError(message: "正在确认上一项操作，请稍候") }
+        guard !actionStorageError else { throw BridgeError(message: "请先检查执行结果，再结束损坏记录的重试") }
+        guard kind == "text" || (kind == "workflow" && value.range(of: "^[a-zA-Z0-9-]{1,100}$", options: .regularExpression) != nil) else {
+            throw BridgeError(message: "操作内容无效，请检查待确认记录")
+        }
+        if kind == "text", value.utf8.count > 65536 { throw BridgeError(message: "文字最多 64 KB，请改为发送文件") }
+        actionSending = true
+        defer { actionSending = false }
+        if state?.capabilities?.reliableActions != 1 { apply(try await BridgeAPI.get("/api/state", as: BridgeState.self)) }
+        guard state?.capabilities?.reliableActions == 1 else { throw BridgeError(message: "请重启更新后的 Mac NearBridge 服务") }
+        let pending = try actionJournal.prepare(kind: kind, value: value, peerId: state?.device?.id)
+        pendingAction = pending
+        var body: [String: Any] = ["requestId": pending.requestId, "requestedAt": pending.requestedAt]
+        body["peerId"] = pending.peerId as Any? ?? NSNull()
+        if kind == "text" { body["text"] = value }
+        _ = try await BridgeAPI.request(kind == "text" ? "/api/actions/text" : "/api/actions/workflows/\(value)/run", method: "POST", body: body)
+        try actionJournal.save([]); pendingAction = nil
+        if !serviceAvailable { await refresh() }
     }
     func chooseFiles() {
         let panel = NSOpenPanel()

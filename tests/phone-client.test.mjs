@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import * as module from "node:module";
 import vm from "node:vm";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 // Exercise the actual non-UI ArkTS client with in-memory platform adapters.
 // No phone, real filesystem, Bluetooth radio or network is used.
-function fixture(respond, bluetooth = false, fileSize = 0) {
+function fixture(respond, bluetooth = false, fileSize = 0, restoredFiles) {
   const root = "/sandbox/nearbridge";
   const pair = { name: "Test Mac", url: "https://192.168.1.2:53320", session: "test-session", certificate: "test", publicKeyHash: "test-pin" };
-  const files = new Map([
+  const files = restoredFiles || new Map([
     [`${root}/paired.json`, JSON.stringify(pair)],
     [`${root}/root.pem`, "old-root"],
     [`${root}/bluetooth.json`, JSON.stringify({ enabled: bluetooth, id: "11:22:33:44:55:66", name: "Test Mac", transport: "ble-v1" })],
@@ -23,8 +23,8 @@ function fixture(respond, bluetooth = false, fileSize = 0) {
     OpenMode: { CREATE: 1, READ_WRITE: 2, TRUNC: 4, READ_ONLY: 8 },
     accessSync: (path) => path === root || files.has(path),
     mkdirSync(path) { files.set(path, ""); },
-    readTextSync(path) { if (!files.has(path)) throw new Error("missing"); return files.get(path); },
-    openSync(path, mode) { if (mode & 1 && !files.has(path)) files.set(path, Buffer.alloc(0)); return { fd: path }; },
+    readTextSync(path) { if (!files.has(path)) throw new Error("missing"); return files.get(path).toString(); },
+    openSync(path, mode) { if (mode & 4 || (mode & 1 && !files.has(path))) files.set(path, Buffer.alloc(0)); return { fd: path }; },
     statSync: (path) => ({ size: files.has(path) ? Buffer.byteLength(files.get(path)) : fileSize, mtime: 123 }),
     readSync: (_fd, buffer) => buffer.byteLength,
     writeSync(fd, value, options) {
@@ -54,7 +54,7 @@ function fixture(respond, bluetooth = false, fileSize = 0) {
         }, destroy() { destroyedRequests++; cancel(new Error("HTTP task destroyed")); } };
       },
     },
-    util: { TextDecoder: class { decodeToString(bytes) { return new TextDecoder().decode(bytes); } }, generateRandomUUID: () => "00000000-0000-4000-8000-000000000001" },
+    util: { TextEncoder: class { encodeInto(text) { return new TextEncoder().encode(text); } }, TextDecoder: class { decodeToString(bytes) { return new TextDecoder().decode(bytes); } }, generateRandomUUID: () => randomUUID() },
     BluetoothTunnel: {
       shared: { async ensure() { bluetoothConnections++; }, stop() {}, retry() {} },
       trace() {}, lastError: "",
@@ -70,6 +70,7 @@ function fixture(respond, bluetooth = false, fileSize = 0) {
   const Client = new vm.Script(module.stripTypeScriptTypes(source) + "\nBridgeClient;").runInContext(context);
   const client = new Client();
   client.init({ filesDir: "/sandbox" });
+  client.state = { capabilities: { reliableActions: 1 }, items: [], workflows: [], jobs: [] };
   return { client, storage, files, requests, fileIO, get bluetoothConnections() { return bluetoothConnections; }, get destroyedRequests() { return destroyedRequests; } };
 }
 
@@ -93,7 +94,7 @@ test("failed re-pairing restores the previous Mac and Bluetooth choice", { skip 
   await assert.rejects(() => f.client.pair(qr));
   assert.equal(f.storage.get("useBluetooth"), true);
   assert.equal(f.storage.get("macName"), "Test Mac");
-  assert.equal(f.files.get("/sandbox/nearbridge/root.pem"), "old-root");
+  assert.equal(f.files.get("/sandbox/nearbridge/root.pem").toString(), "old-root");
   assert.equal(JSON.parse(f.files.get("/sandbox/nearbridge/paired.json")).session, "test-session");
   f.client.stop();
 });
@@ -184,11 +185,11 @@ test("out-of-order state snapshots cannot roll back an already observed revision
 });
 
 test("a foreground action with an active revision does not wait for a redundant full snapshot", { skip }, async () => {
-  const f = fixture(async (url) => url.endsWith("/api/state") ? { revision: "boot.1", items: [], workflows: [], jobs: [] } : {});
+  const f = fixture(async (url) => url.endsWith("/api/state") ? { capabilities: { reliableActions: 1 }, revision: "boot.1", items: [], workflows: [], jobs: [] } : {});
   await f.client.refresh();
   f.client.active = true;
   await f.client.sendText("fast");
-  assert.deepEqual(f.requests.map(request => new URL(request.url).pathname), ["/api/state", "/api/items"]);
+  assert.deepEqual(f.requests.map(request => new URL(request.url).pathname), ["/api/state", "/api/actions/text"]);
   f.client.stop();
 });
 
@@ -318,4 +319,130 @@ test("a blocked file download cannot block a workflow state notification", { ski
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(JSON.parse(f.storage.get("stateJSON")).jobs[0].status, "succeeded");
   } finally { f.client.stop(); }
+});
+
+for (const action of ["sendText", "runWorkflow"]) {
+  test(`${action}: a lost reply and an app restart reuse the durable operation ID`, { skip }, async () => {
+    const sent = [];
+    const f = fixture(async (_url, options) => {
+      if (options.method === "POST") { sent.push(JSON.parse(options.extraData)); throw new Error("reply lost after commit"); }
+      return {};
+    });
+    await assert.rejects(f.client[action]("测试操作"), /重试确认/);
+    const pending = JSON.parse(f.files.get("/sandbox/nearbridge/action.json"))[0];
+    assert.equal(pending.requestId, sent[0].requestId);
+    const restarted = fixture(async (_url, options) => {
+      if (options.method === "POST") sent.push(JSON.parse(options.extraData));
+      return { capabilities: { reliableActions: 1 }, items: [], workflows: [], jobs: [] };
+    }, false, 0, f.files);
+    assert.ok(restarted.storage.get("pendingAction"));
+    await restarted.client.retryPendingAction();
+    assert.deepEqual(sent[0], sent[1]);
+    assert.equal(restarted.storage.get("pendingAction"), "");
+    await restarted.client[action]("测试操作");
+    assert.notEqual(sent[2].requestId, sent[1].requestId, "an acknowledged operation can be deliberately repeated");
+    assert.ok(restarted.requests.filter(r => r.options.method === "POST").every(r => r.url.includes("/api/actions/")), "old servers cannot silently accept reliable requests");
+  });
+}
+
+test("pending actions cannot be replaced by different content or replayed after re-pairing", { skip }, async () => {
+  const f = fixture(async () => { throw new Error("lost reply"); });
+  await assert.rejects(f.client.sendText("original"));
+  const before = f.requests.length;
+  await assert.rejects(f.client.sendText("different"), /上一项操作/);
+  f.client.paired.actionScope = "new-local-pairing-scope";
+  await assert.rejects(f.client.retryPendingAction(), /上一项操作/);
+  assert.equal(f.requests.length, before);
+  f.client.discardPendingAction();
+  assert.equal(f.storage.get("pendingAction"), "");
+});
+
+test("journal corruption or failed persistence blocks side effects instead of minting another ID", { skip }, async () => {
+  const f = fixture(async () => ({}));
+  f.fileIO.renameSync = () => { throw new Error("storage full"); };
+  await assert.rejects(f.client.sendText("not sent"), /storage full/);
+  assert.equal(f.requests.length, 0);
+  f.files.set("/sandbox/nearbridge/action.json", "broken json");
+  const restarted = fixture(async () => ({}), false, 0, f.files);
+  await assert.rejects(restarted.client.sendText("not sent"), /无法读取/);
+  assert.equal(restarted.requests.length, 0);
+});
+
+test("concurrent taps share one in-flight action and acknowledgement cleanup failures retain its ID", { skip }, async () => {
+  let reply;
+  const f = fixture(async (_url, options) => options.method === "POST" ? new Promise(resolve => { reply = resolve; }) : {});
+  const first = f.client.sendText("hello");
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(f.client.sendText("hello"), /正在确认/);
+  const id = JSON.parse(f.requests[0].options.extraData).requestId;
+  const rename = f.fileIO.renameSync;
+  f.fileIO.renameSync = () => { throw new Error("disk full after acknowledgement"); };
+  reply({ accepted: true });
+  await assert.rejects(first, /重试确认/);
+  assert.equal(JSON.parse(f.files.get("/sandbox/nearbridge/action.json"))[0].requestId, id);
+  f.fileIO.renameSync = rename;
+});
+
+test("automatic mode prefers pinned LAN and never attaches the session to discovery probes", { skip }, async () => {
+  const f = fixture(async () => ({ capabilities: { reliableActions: 1 }, items: [], workflows: [], jobs: [] }), true);
+  f.client.connectionMode = "auto";
+  await f.client.refresh();
+  assert.equal(f.bluetoothConnections, 0);
+  assert.equal(f.storage.get("useBluetooth"), false);
+  assert.equal(f.requests[0].options.header.Authorization, undefined);
+  assert.equal(f.requests[0].options.certificatePinning.publicKeyHash, "test-pin");
+  assert.equal(f.requests[1].options.header.Authorization, "Bearer test-session");
+  f.client.stop();
+});
+
+test("automatic mode falls back to BLE on a failed LAN probe, while pure BLE never probes LAN", { skip }, async () => {
+  const f = fixture(async url => {
+    if (url.includes("192.168")) throw new Error("LAN unavailable or pin rejected");
+    return { items: [], workflows: [], jobs: [] };
+  }, true);
+  f.client.connectionMode = "auto";
+  await f.client.refresh();
+  assert.equal(f.storage.get("useBluetooth"), true);
+  assert.ok(f.bluetoothConnections > 0);
+  assert.ok(f.requests[1].url.startsWith("https://127.0.0.1"));
+  f.client.stop();
+  const pure = fixture(async () => ({ items: [], workflows: [], jobs: [] }), true);
+  await pure.client.refresh();
+  assert.ok(pure.requests.every(r => r.url.startsWith("https://127.0.0.1")));
+  assert.equal(pure.storage.get("connectionMode"), "bt", "upgrade keeps the original explicit Bluetooth choice");
+  pure.client.stop();
+});
+
+test("automatic route selection cannot change a running transfer, action or HTTP request", { skip }, async () => {
+  for (const busy of ["sending", "receiving", "actionBusy", "checkingBluetooth", "requests"]) {
+    const f = fixture(async () => ({}), true);
+    f.client.connectionMode = "auto";
+    if (busy === "receiving") f.client.receiving.set("file", Promise.resolve());
+    else if (busy === "requests") f.client.requests.add({ destroy() {} });
+    else f.client[busy] = true;
+    await f.client.ensureRoute();
+    assert.equal(f.requests.length, 0, busy);
+    assert.equal(f.storage.get("useBluetooth"), true, busy);
+    f.client.stop();
+  }
+});
+
+test("a late LAN probe cannot switch a manually selected Bluetooth connection", { skip }, async () => {
+  let finishProbe;
+  const f = fixture(async () => new Promise(resolve => { finishProbe = resolve; }), true);
+  f.client.connectionMode = "auto";
+  const old = f.client.ensureRoute();
+  await new Promise(resolve => setImmediate(resolve));
+  f.client.stop(); f.client.connectionMode = "bt";
+  finishProbe({ ok: true });
+  await old;
+  assert.equal(f.storage.get("useBluetooth"), true);
+  assert.equal(f.client.connectionMode, "bt");
+});
+
+test("new native clients reject an old server before submitting actions", { skip }, async () => {
+  const f = fixture(async () => ({ items: [], workflows: [], jobs: [] }));
+  f.client.state = undefined;
+  await assert.rejects(f.client.sendText("hello"), /0.6/);
+  assert.equal(f.requests.filter(r => r.options.method === "POST").length, 0);
 });

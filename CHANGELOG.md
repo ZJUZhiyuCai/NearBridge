@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0 — 2026-10-26
+
+- Reconnect directly to the remembered BLE device; scan only on failure and stop early when the selected device is found. Cancel pending GATT work immediately, isolate late callbacks and apply bounded retry/backoff.
+- Add automatic, Bluetooth-only and LAN-only connection modes. Automatic mode probes the pinned LAN endpoint before falling back to the selected BLE peer; transfers and actions keep their route until completion. Existing explicit choices survive upgrades.
+- Persist text/workflow operation IDs on both native clients before submission. A separate bounded server receipt ledger survives history deletion/trimming and restart; seven-day expiry rejects stale retries instead of executing them again. Failed commits roll back before side effects.
+- Add explicit “retry confirmation” and “end retry” controls. Bind pending actions to their original pairing; never replay workflows on app startup. Dedicated reliable endpoints prevent older servers from silently ignoring IDs.
+- Add radio-adapter, journal-recovery, transport-selection and real HTTP/TLS regressions. Native builds and 81 local tests pass; device evidence and remaining limits are recorded in [verification](docs/VERIFICATION.md).
+
+Upgrade Mac first, then the phone. Basic BLE reconnect, workflow and 32 KB self-test passed on Mate 70 Pro+; automatic BLE fallback is user-confirmed. Automatic LAN selection, large-file throughput and the full fault matrix remain to be tested on hardware.
+
 ## 0.5.0 — 2026-10-26
 
 - Optional item deltas for both native clients: changed items, removals and ordering, with exact-baseline validation and full-snapshot fallback. Older clients keep their existing protocol.
@@ -9,7 +19,7 @@
 - Roll back a receipt marker on persistence failure, and invalidate cached state when an offline pairing expires.
 - Add actual Swift and ArkTS delta regressions, streaming-revocation and controlled slow-disk cases, plus an isolated active-sync benchmark. See [review](docs/ADVERSARIAL-REVIEW.md) and [measurements](docs/PERFORMANCE.md).
 
-New phone hardware, BLE throughput and fault recovery remain pending.
+Later the same day, 0.5 cover-install, retained pairing, 32 KB BLE self-test and a phone-triggered workflow were verified. BLE throughput and the full fault matrix remain pending.
 
 ## 0.4.0 — 2026-10-26
 

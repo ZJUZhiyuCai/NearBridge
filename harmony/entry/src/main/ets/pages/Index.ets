@@ -23,6 +23,8 @@ struct Index {
   @StorageLink('outgoingCount') private outgoingCount: number = 0;
   @StorageLink('autoReceive') private autoReceive: boolean = true;
   @StorageLink('useBluetooth') private useBluetooth: boolean = false;
+  @StorageLink('connectionMode') private connectionMode: string = 'lan';
+  @StorageLink('pendingAction') private pendingAction: string = '';
   @StorageLink('bluetoothName') private bluetoothName: string = '';
   @StorageLink('bluetoothCheck') private bluetoothCheck: string = '';
   // 外观：design/Theme.ets 写入
@@ -143,11 +145,21 @@ struct Index {
     });
   }
 
-  private chooseLan(): void {
-    this.bluetoothListed = false;
-    if (!this.useBluetooth) return;
-    BridgeClient.shared.useLocalNetwork();
-    this.toast('已切回局域网');
+  private chooseMode(mode: string): void {
+    this.execute(async () => {
+      await BridgeClient.shared.setConnectionMode(mode);
+      this.bluetoothListed = false;
+      this.toast(mode === 'auto' ? '已开启自动连接' : (mode === 'bt' ? '已选择仅蓝牙' : '已选择仅局域网'));
+    });
+  }
+  private discardAction(): void {
+    this.execute(async () => {
+      const choice = await this.getUIContext().getPromptAction().showDialog({
+        title: '结束重试？', message: '这不会撤销 Mac 上已经执行的操作。请先检查 Mac 的结果，之后再次点按会发起一项新操作。',
+        buttons: [{ text: '保留', color: this.c().text2 }, { text: '已检查，结束重试', color: this.c().tint }]
+      });
+      if (choice.index === 1) BridgeClient.shared.discardPendingAction();
+    });
   }
 
   private findMacs(): void {
@@ -188,8 +200,8 @@ struct Index {
     return this.c().text3;
   }
   private routeLabel(): string {
-    if (!this.useBluetooth) return '局域网';
-    return this.bluetoothName ? `蓝牙 · ${this.bluetoothName}` : '蓝牙';
+    const route = this.useBluetooth ? '蓝牙' : '局域网';
+    return this.connectionMode === 'auto' ? `自动 · 当前${route}` : route;
   }
   private linkLine(): string { return `${this.phaseLabel()} · ${this.routeLabel()}`; }
 
@@ -252,7 +264,7 @@ struct Index {
     return item.source === 'mac' && item.kind !== 'text' && this.isSaved(item) && isImageName(item.name)
       && BridgeClient.shared.savedPath(item.id).length > 0;
   }
-  private routeSelected(kind: string): boolean { return kind === 'bt' ? this.useBluetooth : !this.useBluetooth; }
+  private routeSelected(kind: string): boolean { return kind === this.connectionMode; }
 
   // ---------- 页面 ----------
 
@@ -381,6 +393,7 @@ struct Index {
         ForEach(this.freshFromMac(), (item: BridgeItem) => { this.macCard(item) }, (item: BridgeItem) => item.id)
         this.sendTiles()
         this.composer()
+        if (this.pendingAction) { this.pendingActionCard() }
         if (this.progress || this.outgoingCount > 0) { this.transferCard() }
 
         this.sectionTitle('快捷指令', '点一下，Mac 就开始')
@@ -842,6 +855,21 @@ struct Index {
 
   // ----- 连接与设置（半屏 Sheet） -----
 
+  @Builder pendingActionCard() {
+    Column({ space: 10 }) {
+      Text(this.pendingAction).fontSize(15).fontWeight(FontWeight.Medium).fontColor(this.c().text).width('100%')
+      Text('重试会继续同一项操作。不会因回执丢失而再次发送或执行。')
+        .fontSize(12).fontColor(this.c().text2).width('100%')
+      Row({ space: 12 }) {
+        Button('重试确认').fontColor(Color.White).backgroundColor(this.c().tint).enabled(!this.busy)
+          .onClick(() => { this.execute(async () => { const sent = await BridgeClient.shared.retryPendingAction(); if (sent && this.draft === sent) this.draft = ''; this.toast('Mac 已确认接收'); }); })
+        Button('结束重试').fontColor(this.c().text2).backgroundColor(Color.Transparent).enabled(!this.busy)
+          .onClick(() => { this.discardAction(); })
+      }
+    }
+    .padding(16).width('100%').borderRadius(18).backgroundColor(this.c().card).margin({ top: 12 })
+  }
+
   @Builder settingsSheet() {
     Column() {
       Row() {
@@ -883,11 +911,17 @@ struct Index {
 
           this.groupTitle('连接方式')
           Row({ space: 12 }) {
-            this.routeCard('lan', '局域网', '快，适合大文件', '', glyph('wifi'))
-            this.routeCard('bt', '蓝牙', '不用同一个 Wi‑Fi', '测试版', glyph('bluetooth'))
+            this.routeCard('auto', '自动', '优先高速连接', '', glyph('laptop'))
+            this.routeCard('lan', '仅局域网', '适合大文件', '', glyph('wifi'))
+            this.routeCard('bt', '仅蓝牙', '无需同一 Wi‑Fi', '', glyph('bluetooth'))
           }
           .width('100%')
-          this.footnote('线路由你选择，不会自动切换。选蓝牙后，文字、文件和快捷指令都只走蓝牙；大文件较慢，可随时切回局域网。')
+          this.footnote('自动：优先使用局域网，连接不上时尝试已选的蓝牙 Mac。正在传输时保持当前线路。选择“仅蓝牙”后，所有内容只走蓝牙。')
+          if (this.connectionMode !== 'lan') {
+            Button(this.bluetoothName ? `蓝牙 Mac：${this.bluetoothName} · 更换` : '选择蓝牙 Mac 作为备用')
+              .fontSize(14).fontColor(this.c().tint).backgroundColor(Color.Transparent).margin({ top: 8 })
+              .enabled(!this.busy).onClick(() => { this.findMacs(); })
+          }
 
           if (this.bluetoothListed) { this.peerList() }
 
@@ -1021,7 +1055,7 @@ struct Index {
     .backgroundColor(this.c().card)
     .border({ width: 2, color: this.routeSelected(kind) ? this.c().tint : Color.Transparent })
     .enabled(!this.busy)
-    .onClick(() => { if (kind === 'bt') { this.findMacs(); } else { this.chooseLan(); } })
+    .onClick(() => { if (kind === 'bt' && !this.bluetoothName) { this.findMacs(); } else { this.chooseMode(kind); } })
   }
 
   @Builder peerList() {
@@ -1060,9 +1094,9 @@ struct Index {
         .opacity(this.busy ? 0.5 : 1)
         .onClick(() => {
           this.execute(async () => {
-            await BridgeClient.shared.useBluetoothDevice(peer.id, peer.name);
+            await BridgeClient.shared.useBluetoothDevice(peer.id, peer.name, this.connectionMode === 'auto');
             this.bluetoothListed = false;
-            this.toast(`已改用蓝牙：${peer.name}`);
+            this.toast(`已选择蓝牙 Mac：${peer.name}`);
           });
         })
       }, (peer: BluetoothPeer) => peer.id)

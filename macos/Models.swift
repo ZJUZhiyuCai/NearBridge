@@ -13,7 +13,9 @@ struct WorkflowJob: Decodable, Identifiable {
 }
 struct PairRequest: Decodable { let id: String; let name: String }
 struct BridgeSettings: Decodable { let copyIncomingText: Bool }
+struct Capabilities: Decodable { let reliableActions: Int? }
 struct BridgeState: Decodable {
+    let capabilities: Capabilities?
     let revision: String?
     let name: String; let version: String; let paired: Bool; let device: Device?
     var items: [BridgeItem]; let workflows: [Workflow]; let jobs: [WorkflowJob]
@@ -77,6 +79,42 @@ struct QueuedFile: Codable, Identifiable {
 struct BridgeError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
+}
+
+struct PendingAction: Codable {
+    let requestId: String; let requestedAt: Int64; let kind: String; let value: String; let peerId: String?
+    var label: String { kind == "text" ? "文字发送结果尚未确认" : "快捷指令结果尚未确认" }
+}
+
+struct ActionJournal {
+    let url: URL
+    func load() throws -> PendingAction? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let actions = try JSONDecoder().decode([PendingAction].self, from: Data(contentsOf: url))
+        guard actions.count <= 1 else { throw BridgeError(message: "待确认操作记录无效") }
+        if let action = actions.first {
+            guard ["text", "workflow"].contains(action.kind), action.requestedAt > 0,
+                  action.requestId.range(of: "^[a-zA-Z0-9-]{16,80}$", options: .regularExpression) != nil else {
+                throw BridgeError(message: "待确认操作记录无效")
+            }
+        }
+        return actions.first
+    }
+    func prepare(kind: String, value: String, peerId: String?) throws -> PendingAction {
+        if let pending = try load() {
+            guard pending.kind == kind, pending.value == value, pending.peerId == peerId else {
+                throw BridgeError(message: "上一项操作结果尚未确认。请先重试确认，或检查结果后结束重试。")
+            }
+            return pending
+        }
+        let action = PendingAction(requestId: UUID().uuidString.lowercased(), requestedAt: Int64(Date().timeIntervalSince1970 * 1000), kind: kind, value: value, peerId: peerId)
+        try save([action])
+        return action
+    }
+    func save(_ actions: [PendingAction]) throws {
+        try JSONEncoder().encode(actions).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
 }
 func byteString(_ size: Int64) -> String { ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
 

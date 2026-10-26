@@ -5,8 +5,8 @@ Automated checks run against synthetic data in temporary directories. Hardware e
 | Check | Command / environment | What it establishes |
 | --- | --- | --- |
 | Syntax, versions, repository hygiene | `npm run check` | All JS/MJS parses, metadata matches, common secret/private paths excluded, local Markdown links resolve |
-| Server and client regressions | `npm test`, Node 22.13+ | Real HTTP/TLS, pairing and authorization, quotas, resumable files, receipts, jobs, actual ArkTS business source with in-memory platform adapters |
-| Swift protocol/state models | Included in `npm test` on macOS | Actual Swift framing and MTU reassembly; delta merge, missing/duplicate IDs, receipts, stale revision rejection |
+| Server and client regressions | `npm test`, Node 22.13+ | Real HTTP/TLS, pairing and authorization, quotas, resumable files, receipts, jobs, actual ArkTS business/BLE source with controlled radio, filesystem and HTTP adapters |
+| Swift protocol/state models | Included in `npm test` on macOS | Actual Swift framing and MTU reassembly; delta merge, durable action journal, missing/duplicate IDs, receipts, stale revision rejection |
 | Mac application | `npm run build:mac` then `codesign --verify --deep --strict dist/NearBridge.app` | Native source compiles for declared macOS 13 minimum; ad-hoc bundle signature validates |
 | HarmonyOS application | `npm run build:phone` | Strict ArkTS compilation with official SDK and local signing when configured |
 | Latency | `npm run benchmark` | Server mutation-to-observation over loopback HTTP/HTTPS; no real BLE latency claim |
@@ -14,7 +14,7 @@ Automated checks run against synthetic data in temporary directories. Hardware e
 
 CI runs Node 22/24/26 on Linux and Node 24 plus Swift compilation on macOS 15. Linux intentionally skips the two Swift-only tests. Phone-client tests require Node's built-in TypeScript stripping. HarmonyOS SDK/signing material is not uploaded to CI; record the local build result separately.
 
-## Real-device checklist for 0.5
+## Real-device checklist for 0.6
 
 Use the same paired phone and cover-install the new HAP; do not uninstall or clear data.
 
@@ -29,7 +29,11 @@ Use the same paired phone and cover-install the new HAP; do not uninstall or cle
 9. Keep a large synthetic text history, trigger workflows and confirm incremental updates preserve unchanged text and ordering. Restart the Mac service to exercise full-snapshot fallback.
 10. Revoke/rotate pairing while downloading a synthetic file; no new bytes should be produced after cancellation, allowing for network bytes already in flight.
 
-The existing 0.2 device evidence is a baseline. It does not validate the redesigned 0.3–0.5 phone UI or the new notification/delta lifecycle. Large-file throughput, long-running BLE stability and the complete fault matrix remain unverified. Slow-disk tests use a controlled file adapter to verify scheduling and commit behavior, not a physical failing disk.
+11. Reopen the phone and record remembered-device start → local BLE TLS listener readiness; keep this separate from tap-to-result timing.
+12. Lose an action response, then retry with its original ID; check one server item/job. Repeat after app/server restart and history removal. These faults currently have automated coverage, not phone-level injected-fault evidence.
+13. Select each connection mode. Automatic BLE fallback has user confirmation; automatic LAN preference/recovery and changes during file transfer still require hardware testing.
+
+0.5 cover-install, preserved pairing, 32 KB self-test and phone workflow passed on the returned phone. 0.6 additionally has actual no-scan reconnect logs, a persisted workflow receipt, Mac file/hash evidence and user-confirmed self-test/automatic BLE fallback. See [verification](VERIFICATION.md) for exact evidence boundaries. Large-file throughput, long-running BLE stability and the complete fault matrix remain unverified. Slow-disk tests use a controlled file adapter to verify scheduling and commit behavior, not a physical failing disk.
 
 ## Evidence standards
 

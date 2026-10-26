@@ -66,14 +66,32 @@ Only the source role and paired device can access its in-progress transfer. Revo
 
 Chunks use asynchronous file writes and fsync, with authorization rechecked before advancing persisted offsets. Repeating an already valid receipt is a no-op (the SHA-256 is still checked). Active downloads are aborted when authorization is revoked/rotated and within the one-second expiry sweep; bytes already sent may still be in flight.
 
-## Workflows and retries
+## Reliable text and workflows (0.6)
 
-`POST /api/workflows/:id/run` accepts a client-generated `requestId`. Reusing the same ID for the same role/device/workflow returns the original job; changing the workflow with that ID is rejected. Jobs are serialized. The Mac must have enabled the workflow. Phone-provided shell text or shortcut arguments are never accepted.
+`GET /api/state` advertises `capabilities.reliableActions: 1`. Native clients use new routes, so an older server returns an error instead of silently ignoring idempotency fields:
 
-Do not blindly retry an ambiguous action with a new ID: a network failure does not prove the original action did not execute. File UUID retries are idempotent. Text sends currently lack durable request-ID deduplication; inspect the feed before retrying an ambiguous send.
+- `POST /api/actions/text`: `{ requestId, requestedAt, text }`.
+- `POST /api/actions/workflows/:id/run`: `{ requestId, requestedAt }`.
+- Mac requests additionally carry `peerId` (current paired ID, or `null` before pairing). An unaccepted request bound to another phone is rejected. Already accepted Mac requests may still retrieve their receipt after pairing changes.
+
+`requestId` is 16–80 ASCII letters/digits/hyphens; clients generate UUIDs. `requestedAt` is the original integer Unix time in milliseconds. Preserve **both** values for all retries. More than five minutes in the future is rejected; requests seven days old return 410 and never execute, even after their receipt was pruned.
+
+The server stores at most 4096 live receipts, scoped by phone identity or local Mac role. Each binds kind, content hash, original timestamp and resulting item/job ID. Live receipts are never evicted for capacity: new requests fail with 507, while existing IDs can still be acknowledged. Receipt and text/job are committed together, with file fsync before index replacement, before a workflow starts. Persistence failure rolls back memory and prevents execution. The private ledger is not sent in the history feed.
+
+Replays return the original item/job without copying text or executing the workflow again. Deleting text or trimming the 100-job history does not remove its receipt: deleted text returns `{ accepted: true, replayed: true, item: null }`; a trimmed job returns `status: accepted`, indicating prior acceptance, not proof of successful completion. Restarted running jobs become `interrupted` and never auto-execute again.
+
+Both native clients persist one pending operation before POST. A lost reply keeps its ID across restart; users can explicitly retry or inspect the result and end retries. Startup and network recovery do **not** replay workflows. Phone journals are bound to a local pairing scope; a new QR pairing cannot inherit an ambiguous action. Corrupt journals block sends until the user checks the result and ends that retry. Ending a retry does not undo its effects.
+
+Old `/api/items` and `/api/workflows/:id/run` remain compatible. Legacy text has no deduplication; legacy workflow IDs deduplicate only while their job is retained. New native clients require the reliable capability for text/workflows. File UUID retries retain their existing protocol. All workflows remain serialized and allowlisted on Mac; no remote shell text or shortcut arguments are accepted.
+
+## Connection selection (0.6)
+
+Phone settings separate the chosen mode (`auto`, `bt`, `lan`) from the actual transport. Upgrading preserves an existing explicit mode; a new pairing defaults to automatic. “Only Bluetooth” never falls back to LAN, and “Only LAN” never touches BLE.
+
+Automatic mode makes an anonymous LAN bootstrap probe with the QR CA and SPKI pin (1.5-second connect/read timeouts); credentials stay off discovery probes. It uses the verified LAN endpoint if reachable, otherwise the selected BLE peer. When idle on BLE it can probe LAN again after at least 30 seconds, between synchronization requests. Active HTTP requests, actions and file transfers block route changes. A failed mutation is never automatically submitted on another route. mDNS offers untrusted candidate addresses; pinned TLS validation remains mandatory.
 
 ## BLE transport
 
 Service UUID `b4525100-17b0-4cb4-96a6-06c73a620c31`; RX `...5101...`, TX `...5102...`. Frames contain type, nonzero stream ID, payload. Types: 1 open, 2 opened, 3 data, 4 close. At most four TLS streams, 512 KiB bounded buffers, and a 120-second idle limit. Use acknowledged writes and indications; respect negotiated MTU and backpressure.
 
-This transports the original pinned TLS connection. It does not bypass authentication or expose the Mac admin listener. BLE mode has no silent LAN fallback. See [BLE implementation and hardware evidence](BLUETOOTH.md).
+This transports the original pinned TLS connection. It does not bypass authentication or expose the Mac admin listener. Bluetooth-only mode has no LAN fallback. Remembered peers connect directly, with discovery on failure. The first two failed rounds cool down for 2/4 seconds; three consecutive failed rounds pause until explicit retry. A link stable for 30 seconds resets this failure history on its next failure. See [BLE implementation and hardware evidence](BLUETOOTH.md).

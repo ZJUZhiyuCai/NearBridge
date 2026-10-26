@@ -1,0 +1,62 @@
+{
+  "mode": "changes",
+  "reliableActions": true,
+  "node": "v26.12.1",
+  "platform": "darwin/arm64",
+  "transport": "loopback HTTP (Mac), verified HTTPS (phone); no BLE radio",
+  "observedAt": "2026-10-26T10:36:03.731Z",
+  "latencyMs": {
+    "mac": {
+      "samples": [
+        12.22,
+        5.36,
+        6.27,
+        5.37,
+        6.8,
+        6.57
+      ],
+      "p50": 6.27,
+      "p95": 12.22
+    },
+    "phone": {
+      "samples": [
+        6.51,
+        6.17,
+        7.42,
+        7.67,
+        7.74,
+        6.59
+      ],
+      "p50": 6.59,
+      "p95": 7.74
+    }
+  },
+  "acknowledgementMs": {
+    "mac": {
+      "samples": [
+        12.28,
+        5.45,
+        6.31,
+        5.43,
+        6.86,
+        6.62
+      ],
+      "p50": 6.31,
+      "p95": 12.28
+    },
+    "phone": {
+      "samples": [
+        6.57,
+        6.25,
+        7.52,
+        7.75,
+        7.82,
+        6.66
+      ],
+      "p50": 6.66,
+      "p95": 7.82
+    }
+  },
+  "idleBodyBytesPerMinute": 129.6,
+  "idleNote": "Body-only extrapolation from a fixed synthetic history; excludes HTTP/TLS/BLE framing. Poll phases: 10%, 50%, 90%, repeated twice."
+}

@@ -167,7 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func sendFiles() { openDashboard(); model.chooseFiles() }
     @objc private func openWeb() { NSWorkspace.shared.open(baseURL) }
-    @objc private func sendClipboard() { post("/api/mac/clipboard/send") { [weak self] in self?.openDashboard() } }
+    @objc private func sendClipboard() { openDashboard(); model.sendClipboard() }
     @objc private func openInbox() { post("/api/mac/inbox") }
     @objc private func openLog() { NSWorkspace.shared.open(dataDirectory.appendingPathComponent("mac-app.log")) }
     @objc private func restartService() {
