@@ -1,0 +1,8 @@
+{
+  "modelVersion": "6.0.0",
+  "name": "nearbridge",
+  "version": "0.2.0",
+  "description": "Mac 与 HarmonyOS 的局域网互联",
+  "dependencies": {},
+  "devDependencies": {}
+}

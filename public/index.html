@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f2f2f7">
+  <title>NearBridge · Mac 与鸿蒙互联</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" type="module"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="NearBridge 首页"><img src="/icon.svg" alt="" width="34" height="34"><span>NearBridge<small>MAC × HARMONYOS</small></span></a>
+    <div class="nav-label">工作台</div>
+    <nav aria-label="主导航">
+      <button class="nav-item active" data-nav="transfer"><span class="nav-icon">↔</span>收发</button>
+      <button class="nav-item" data-nav="workflows"><span class="nav-icon">▷</span>工作流</button>
+      <button class="nav-item" data-nav="pairing"><span class="nav-icon">⌘</span>设备连接</button>
+      <button class="nav-item" data-nav="settings"><span class="nav-icon">⚙</span>偏好设置</button>
+    </nav>
+    <div class="sidebar-bottom"><span class="local-mark">●</span> 只在你的设备之间<small>本地运行 · v0.1.0</small></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar">
+      <div class="mobile-brand"><img src="/icon.svg" alt="" width="28" height="28"><strong>NearBridge</strong></div>
+      <div class="breadcrumb"><span>个人设备</span><span>/</span><strong id="page-label">收发</strong></div>
+      <div class="connection" id="connection" role="status"><i></i><span>正在连接</span></div>
+    </header>
+    <nav id="mobile-workspace-nav" class="mobile-workspace-nav phone-only" aria-label="手机工作台" hidden><button data-nav="transfer">收发内容</button><button data-nav="workflows">遥控 Mac</button></nav>
+
+    <main id="main" class="main-content">
+      <section id="loading" class="loading">正在打开你的工作台…</section>
+      <section id="pair-phone" class="phone-pair" hidden>
+        <div class="eyebrow">首次连接</div><h1>连接这台 Mac</h1>
+        <p id="pair-intro">扫码建立配对，之后可以直接打开此页面。</p>
+        <form id="pair-form">
+          <label for="device-name">手机名称</label>
+          <input id="device-name" name="name" value="Mate 70 Pro+" maxlength="60" autocomplete="off" required>
+          <button class="primary" id="pair-submit" type="submit">请求连接</button>
+        </form>
+        <div id="pair-status" role="status" class="notice" hidden></div>
+        <p class="muted compact">配对后，这台手机可以收发文件与文字、触发 Mac 已启用的工作流；Mac 上可随时解除连接权限。</p>
+      </section>
+
+      <section id="transfer-view" hidden>
+        <div class="title-row"><div><div class="eyebrow" id="recipient-kicker">MAC → 手机</div><h1 id="send-title">发送到手机</h1><p class="subtitle" id="recipient">先连接你的华为手机</p></div><button id="inbox-button" class="quiet mac-only">打开收件目录 <span>↗</span></button></div>
+        <div class="transfer-layout">
+          <div class="primary-workspace">
+            <div class="send-tabs" role="tablist" aria-label="发送类型">
+              <button role="tab" aria-selected="true" aria-controls="file-panel" id="file-tab" class="selected">文件与照片</button>
+              <button role="tab" aria-selected="false" aria-controls="text-panel" id="text-tab">文字与链接</button>
+            </div>
+            <div id="file-panel" role="tabpanel" aria-labelledby="file-tab">
+              <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="选择或拖入文件">
+                <svg class="transfer-art" viewBox="0 0 140 94" aria-hidden="true"><rect x="8" y="14" width="72" height="52" rx="7"/><path d="M1 76h86M30 76l3-10m23 10-3-10"/><rect x="98" y="3" width="35" height="72" rx="7"/><path d="M109 11h13M110 67h10"/><path class="accent-stroke" d="M62 38h45m-9-8 9 8-9 8M93 55H49m9-8-9 8 9 8"/></svg>
+                <strong>把文件放到这里</strong><span>照片、视频、文档，保持原文件</span>
+                <span class="choose-label">选择文件 <span>＋</span></span>
+                <small id="file-limit">单个文件最高 512 MB</small>
+              </div>
+              <input type="file" id="file-input" multiple hidden>
+              <div id="upload-status" class="upload-status" hidden aria-live="polite"><div><strong id="upload-name"></strong><span id="upload-percent"></span></div><progress id="upload-progress" max="100" value="0"></progress><small id="upload-detail"></small></div>
+            </div>
+            <form id="text-panel" role="tabpanel" aria-labelledby="text-tab" hidden>
+              <label class="sr-only" for="message">要发送的文字或链接</label>
+              <textarea id="message" placeholder="粘贴一段文字，或者放下一个链接。" rows="7" maxlength="65536"></textarea>
+              <div class="compose-footer"><button type="button" id="clipboard-send" class="quiet mac-only">发送 Mac 剪贴板 ↗</button><span class="phone-only muted compact">可长按输入框粘贴</span><button type="submit" class="primary" id="text-send">发送 <span>↑</span></button></div>
+            </form>
+            <div class="history-heading"><h2>最近收发 <span id="item-count">0</span></h2><div class="history-filters" role="group" aria-label="记录筛选"><button class="selected" data-filter="all">全部</button><button data-filter="received">收到</button><button data-filter="sent">发出</button></div></div>
+            <div id="history" class="history" aria-live="polite"></div>
+          </div>
+          <aside class="device-inspector mac-only">
+            <div class="section-caption">你的连接</div>
+            <div class="device-line"><div class="device-glyph">▰</div><div><strong id="mac-name">这台 Mac</strong><small>本机 · 接收端已运行</small></div><i class="dot online"></i></div>
+            <div class="connection-line"><span></span><small>本地加密传输</small><span></span></div>
+            <div id="phone-line" class="device-line"><div class="device-glyph">▯</div><div><strong id="phone-name">等待华为手机</strong><small id="phone-state">扫码完成首次连接</small></div><i class="dot" id="phone-dot"></i></div>
+            <div id="mini-pairing"><img id="mini-qr" alt="用手机扫描此二维码连接" width="196" height="196" hidden><p id="mini-pair-caption">正在准备连接二维码</p><button class="text-button" id="pair-details">连接说明与二维码 ↗</button></div>
+            <div class="inspector-note"><strong>连接后这样用</strong><p>手机选好文件直接发送；电脑上的文字和链接，也可以随手带到手机。</p></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="workflows-view" hidden>
+        <div class="title-row"><div><div class="eyebrow">手机点一下 · MAC 来执行</div><h1>工作流</h1><p class="subtitle">把常用操作放到手机上，每次执行都有回执。</p></div><button id="workflow-connect" class="quiet mac-only">连接手机 ↗</button></div>
+        <div class="workflow-status"><i class="dot" id="workflow-dot"></i><span id="workflow-connection">正在连接 Mac</span></div>
+        <div id="workflow-list" class="workflow-list"></div>
+        <div class="shortcut-builder mac-only">
+          <div class="builder-heading"><div><h2>接入你的 Mac 快捷指令</h2><p>先在 Mac 选定，手机才会出现这个按钮。输入参数暂不支持。</p></div><button class="quiet" id="load-shortcuts">载入本机快捷指令</button></div>
+          <div id="shortcut-picker" hidden><label for="shortcut-select">选择一个你了解作用的快捷指令</label><div class="shortcut-input"><select id="shortcut-select"></select><button id="add-shortcut" class="primary">加入手机面板</button></div><p class="compact muted" id="shortcut-hint"></p></div>
+        </div>
+        <div class="history-heading"><h2>执行记录</h2><span class="muted compact">最近 20 次</span></div>
+        <div id="workflow-jobs" class="workflow-jobs"></div>
+        <p class="workflow-footnote">手机只能触发 Mac 已启用的按钮。Mac 需要保持唤醒；快捷指令若要求权限或确认，仍需在 Mac 处理。</p>
+      </section>
+
+      <section id="pairing-view" hidden>
+        <div class="eyebrow">设备连接</div><h1>让手机连上来</h1><p class="subtitle">手机和 Mac 连接同一个 Wi-Fi。</p>
+        <div id="paired-summary" class="notice" hidden></div>
+        <div class="pairing-layout"><div class="pairing-qr"><img id="large-qr" alt="连接二维码" width="280" height="280" hidden><p id="pairing-expiry"></p><button class="quiet" id="refresh-pairing">刷新二维码 ↻</button></div><div class="pairing-guide">
+          <ol><li><strong>用手机浏览器打开扫码链接</strong><p>二维码只用于配对，不会发送到外部服务。</p></li><li><strong>首次访问，核对本地证书</strong><p>这是 Mac 自己生成的 HTTPS 证书，手机可能提示证书不受信任。核对下方地址与证书指纹；仅确认这台 Mac 的连接。若浏览器不允许继续，请保留提示，之后换原生端配对。</p></li><li><strong>发送请求，在 Mac 确认</strong><p>成功后可收藏手机页面，下次直接打开。</p></li></ol>
+          <label for="network-select">Mac 的局域网地址</label><select id="network-select"></select>
+          <div class="connection-address" id="pairing-address"></div>
+          <details><summary>查看证书 SHA-256 指纹</summary><code id="fingerprint"></code></details>
+        </div></div>
+        <div class="pending-pairing" id="pending-pairing" hidden><div><strong id="pending-name"></strong><p>正在请求配对，只确认你手边的手机。</p></div><div><button id="reject-pair" class="quiet">拒绝</button><button id="approve-pair" class="primary">允许配对</button></div></div>
+      </section>
+
+      <section id="settings-view" hidden>
+        <div class="eyebrow">偏好设置</div><h1>按你的习惯来</h1><p class="subtitle">所有设置和收件记录保存在这台 Mac。</p>
+        <div class="settings-list">
+          <label class="setting-row" for="auto-copy"><div><strong>收到手机文字后，复制到 Mac 剪贴板</strong><p>打开后会覆盖 Mac 当前剪贴板；默认关闭。不会自动读取 Mac 剪贴板。</p></div><input type="checkbox" id="auto-copy" role="switch"></label>
+          <div class="setting-row"><div><strong>文件收件目录</strong><p id="inbox-path"></p></div><button class="quiet" id="settings-inbox">在访达打开 ↗</button></div>
+          <div class="setting-row"><div><strong>本地暂存空间</strong><p id="storage-usage"></p><p>删除收发记录时，会同时删除 NearBridge 保存的对应文件副本。</p></div></div>
+          <div class="setting-row"><div><strong>手机连接权限</strong><p id="revoke-description">尚未配对</p></div><button class="danger quiet" id="revoke-device">解除配对</button></div>
+        </div>
+        <div class="scope-note"><h2>这个版本的边界</h2><p>手机端是浏览器页面，收发时请保持页面打开。暂不提供手机后台剪贴板同步、投屏、通知同步或任意远程命令执行。</p></div>
+      </section>
+    </main>
+    <footer class="workspace-footer"><span>NearBridge · 个人互联实验室</span><span id="footer-detail">文件与文字，直接抵达。</span></footer>
+  </div>
+  <div id="pair-banner" class="pair-banner" hidden><div><strong id="banner-name"></strong><span>需要在 Mac 确认配对</span></div><button id="banner-review" class="primary">查看请求</button></div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="confirm-dialog"><h2 id="confirm-title"></h2><p id="confirm-message"></p><div><button id="confirm-cancel" class="quiet">取消</button><button id="confirm-ok" class="primary">确认</button></div></dialog>
+  <dialog id="copy-dialog"><h2>复制这段文字</h2><p>浏览器没有授予剪贴板权限，可以长按下方文字复制。</p><textarea id="copy-fallback" readonly rows="6"></textarea><button id="copy-close" class="primary">完成</button></dialog>
+</body>
+</html>

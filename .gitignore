@@ -1,0 +1,31 @@
+node_modules/
+dist/
+.runtime/
+.DS_Store
+*.log
+harmony/.hvigor/
+harmony/.idea/
+harmony/oh_modules/
+harmony/entry/oh_modules/
+harmony/build/
+harmony/entry/build/
+harmony/local.properties
+harmony/build-profile.json5
+
+# Local credentials, device provisioning and signed installation packages
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.cer
+*.p7b
+*.pem
+*.key
+*.jks
+*.keystore
+*.hap
+*.app/
+
+# Local verification screenshots may contain personal transfer history
+docs/screenshots/
