@@ -225,7 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func publishDiscovery() {
         guard discovery == nil else { return }
         let service = NetService(domain: "local.", type: "_nearbridge._tcp.", name: Host.current().localizedName ?? "NearBridge Mac", port: 53320)
-        service.setTXTRecord(NetService.data(fromTXTRecord: ["version": Data("0.3.0".utf8)]))
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        service.setTXTRecord(NetService.data(fromTXTRecord: ["version": Data(version.utf8)]))
         service.publish()
         discovery = service
     }

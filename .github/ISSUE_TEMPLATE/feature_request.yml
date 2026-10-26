@@ -1,0 +1,15 @@
+name: Feature request / 功能建议
+description: 描述日常场景与需要解决的问题
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 哪个操作不方便？
+      description: 写出当前操作步骤、使用频率和期望结果。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议的交互与验收方式
+      description: 如需系统权限、后台运行或额外网络服务，请说明原因。

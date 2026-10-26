@@ -28,6 +28,7 @@ import UniformTypeIdentifiers
     private var queueFile: URL { dataDirectory.appendingPathComponent("native-queue.json") }
 
     func start() {
+        guard polling == nil else { return }
         bluetooth.onStatus = { [weak self] status, enabled in
             self?.bluetoothStatus = status; self?.bluetoothEnabled = enabled
         }
@@ -38,24 +39,49 @@ import UniformTypeIdentifiers
             for index in queue.indices { queue[index].phase = "paused"; queue[index].error = "已保留进度，点继续发送" }
         }
         polling = Task { [weak self] in
+            var failures = 0
             while !Task.isCancelled {
-                await self?.refresh()
-                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                do {
+                    if let revision = self.state?.revision, self.serviceAvailable {
+                        let update = try await BridgeAPI.get("/api/changes?since=\(revision)", as: StateUpdate.self)
+                        try Task.checkCancellation()
+                        if let state = update.state { self.apply(state) }
+                    } else {
+                        let state = try await BridgeAPI.get("/api/state", as: BridgeState.self)
+                        try Task.checkCancellation()
+                        self.apply(state)
+                    }
+                    failures = 0
+                    // Older servers still use the original polling contract.
+                    if self.state?.revision == nil { try await Task.sleep(for: .seconds(2)) }
+                } catch {
+                    if Task.isCancelled { return }
+                    self.serviceAvailable = false; self.connection = "连接服务暂时不可用，正在重连…"
+                    failures = min(failures + 1, 4)
+                    try? await Task.sleep(for: .seconds(min(15, pow(2, Double(failures - 1)))))
+                }
             }
         }
     }
-    func stop() { polling?.cancel(); worker?.cancel(); bluetooth.stop(); persist() }
+    func stop() { polling?.cancel(); polling = nil; worker?.cancel(); bluetooth.stop(); persist() }
     func toggleBluetooth() {
         if bluetoothEnabled { bluetooth.stop() } else { bluetooth.start() }
         UserDefaults.standard.set(bluetoothEnabled, forKey: "nearbridgeBluetoothEnabled")
     }
     func refresh() async {
         do {
-            state = try await BridgeAPI.get("/api/state", as: BridgeState.self)
-            serviceAvailable = true
-            connection = state?.device?.connected == true ? "手机已连接" : (state?.paired == true ? "手机离线 · 文件将等待接收" : "配对后开始互传")
-            onChange?()
+            apply(try await BridgeAPI.get("/api/state", as: BridgeState.self))
         } catch { serviceAvailable = false; connection = "连接服务暂时不可用，正在重连…" }
+    }
+    private func apply(_ next: BridgeState) {
+        if let previous = state?.revision?.split(separator: "."), let revision = next.revision?.split(separator: "."),
+           previous.count == 2, revision.count == 2, previous[0] == revision[0],
+           let oldSequence = Int(previous[1]), let newSequence = Int(revision[1]), newSequence < oldSequence { return }
+        state = next
+        serviceAvailable = true
+        connection = next.device?.connected == true ? "手机已连接" : (next.paired ? "手机离线 · 文件将等待接收" : "配对后开始互传")
+        onChange?()
     }
     @discardableResult
     func action(_ route: String, body: [String: Any] = [:], success: String? = nil) -> Task<Bool, Never> {

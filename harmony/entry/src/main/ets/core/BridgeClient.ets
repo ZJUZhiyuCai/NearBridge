@@ -4,7 +4,7 @@ import { fileIo as fs, fileUri, hash } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { window } from '@kit.ArkUI';
 import { BluetoothTunnel, BluetoothSettings, BLUETOOTH_URL } from './BluetoothTunnel';
-import { BridgeState, BridgeItem, PairedMac, PairingPayload, PairClaim, PairStatus, TransferReply, SavedFile, SendJob, ErrorReply } from './Types';
+import { BridgeState, StateUpdate, BridgeItem, PairedMac, PairingPayload, PairClaim, PairStatus, TransferReply, SavedFile, SendJob, ErrorReply } from './Types';
 
 const CHUNK = 4 * 1024 * 1024;
 const PRIVATE_URL = /^https:\/\/(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}):\d{1,5}$/;
@@ -20,6 +20,11 @@ export class BridgeClient {
   private timer: number = -1;
   private active: boolean = false;
   private syncing: boolean = false;
+  private revision: string = '';
+  private syncFailures: number = 0;
+  private requests: Set<http.HttpRequest> = new Set();
+  private receiving: Map<string, Promise<void>> = new Map();
+  private receivingQueue: boolean = false;
   private sending: boolean = false;
   private cancelRequested: boolean = false;
   private discoveryBusy: boolean = false;
@@ -94,6 +99,7 @@ export class BridgeClient {
     if (pair.session && !anonymous) headers['Authorization'] = `Bearer ${pair.session}`;
     if (body !== undefined) headers['Content-Type'] = typeof body === 'string' ? 'application/json' : 'application/octet-stream';
     const client = http.createHttp();
+    this.requests.add(client);
     try {
       const options: http.HttpRequestOptions = {
         method: method, header: headers, extraData: body, expectDataType: http.HttpDataType.ARRAY_BUFFER,
@@ -119,7 +125,7 @@ export class BridgeClient {
         if (BluetoothTunnel.lastError) throw new Error(BluetoothTunnel.lastError);
       }
       throw error as Error;
-    } finally { client.destroy(); }
+    } finally { if (this.requests.delete(client)) client.destroy(); }
   }
   private decode(response: http.HttpResponse): string {
     return new util.TextDecoder().decodeToString(new Uint8Array(response.result as ArrayBuffer));
@@ -187,16 +193,27 @@ export class BridgeClient {
     if (AppStorage.get<string>('linkPhase') !== 'online') AppStorage.setOrCreate('linkPhase', 'connecting');
     this.updateScreenHold();
     this.tick();
-    this.timer = setInterval(() => { this.tick(); }, 3000);
   }
   stop(): void {
     this.connectionEpoch++;
+    this.progressEpoch++;
     this.active = false;
+    this.syncing = false;
+    this.revision = '';
+    this.syncFailures = 0;
+    this.receivingQueue = false;
+    this.receiving.clear();
     this.cancelRequested = true;
     AppStorage.setOrCreate('linkPhase', 'offline');
+    AppStorage.setOrCreate('progressFraction', -1);
+    if (this.screenHolds > 0) AppStorage.setOrCreate('transferPhase', 'paused');
     this.updateScreenHold();
-    if (this.timer >= 0) clearInterval(this.timer);
+    if (this.timer >= 0) clearTimeout(this.timer);
     this.timer = -1;
+    // Destroying active HTTP tasks releases long polls and blocked transfers now,
+    // instead of making the next foreground session wait for a 120 s timeout.
+    this.requests.forEach((request: http.HttpRequest) => { try { request.destroy(); } catch (_) {} });
+    this.requests.clear();
     try { this.discovery?.stopSearchingMDNS(); } catch (_) {}
     this.discovery = undefined;
     BluetoothTunnel.shared.stop();
@@ -205,7 +222,20 @@ export class BridgeClient {
     const epoch = this.connectionEpoch;
     const state = await this.json<BridgeState>('/api/state');
     if (epoch !== this.connectionEpoch) return;
-    AppStorage.setOrCreate('stateJSON', JSON.stringify(state));
+    this.applyState(state);
+    this.connectionReady();
+  }
+  private applyState(state: BridgeState): void {
+    const next = state.revision || '';
+    const previousParts = this.revision.split('.');
+    const nextParts = next.split('.');
+    if (next && nextParts[0] === previousParts[0] && Number(nextParts[1]) < Number(previousParts[1])) return;
+    this.revision = next;
+    const encoded = JSON.stringify(state);
+    if (encoded !== AppStorage.get<string>('stateJSON')) AppStorage.setOrCreate('stateJSON', encoded);
+  }
+  private connectionReady(): void {
+    this.sessionRejected = false;
     AppStorage.setOrCreate('status', this.bluetooth.enabled ? '已连接 · 纯蓝牙直传' : '已连接 · 局域网直传');
     AppStorage.setOrCreate('linkPhase', 'online');
   }
@@ -213,22 +243,59 @@ export class BridgeClient {
     if (this.syncing || !this.active) return;
     this.syncing = true;
     const epoch = this.connectionEpoch;
+    let delay = 0;
     try {
-      await this.refresh();
-      if (epoch !== this.connectionEpoch || !this.active) return;
-      if (!this.sending && !this.checkingBluetooth && AppStorage.get<boolean>('autoReceive') !== false) {
-        const state = JSON.parse(AppStorage.get<string>('stateJSON') || '{}') as BridgeState;
-        for (const item of state.items.filter((item: BridgeItem) => item.source === 'mac')) {
-          if (!this.active || this.sending) break;
-          if (item.kind === 'file') await this.receive(item);
-        }
+      if (this.revision) {
+        const update = await this.json<StateUpdate>(`/api/changes?since=${encodeURIComponent(this.revision)}`);
+        if (epoch !== this.connectionEpoch || !this.active) return;
+        if (update.state) this.applyState(update.state);
+        this.connectionReady();
+      } else {
+        await this.refresh();
       }
+      if (epoch !== this.connectionEpoch || !this.active) return;
+      this.syncFailures = 0;
+      // Keep the notification channel responsive while a file is being received.
+      this.receivePending();
+      delay = this.revision ? 0 : 3000; // Compatibility with an older Mac build.
     } catch (error) {
       if (epoch === this.connectionEpoch && this.active) {
+        this.revision = ''; // Bootstrap again after reconnect or a server rollback.
         this.connectionFailed(error as Error);
         if (!this.bluetooth.enabled) this.discover();
+        this.syncFailures++;
+        delay = Math.min(15000, 1000 * Math.pow(2, Math.min(4, this.syncFailures - 1)));
       }
-    } finally { this.syncing = false; }
+    } finally {
+      if (epoch === this.connectionEpoch) {
+        this.syncing = false;
+        if (this.active && !this.sessionRejected) {
+          this.timer = setTimeout(() => { this.timer = -1; this.tick(); }, delay);
+        }
+      }
+    }
+  }
+  private async receivePending(): Promise<void> {
+    if (this.receivingQueue || this.sending || this.checkingBluetooth || !this.active || AppStorage.get<boolean>('autoReceive') === false) return;
+    this.receivingQueue = true;
+    const epoch = this.connectionEpoch;
+    const snapshot = AppStorage.get<string>('stateJSON') || '{}';
+    try {
+      const state = JSON.parse(snapshot) as BridgeState;
+      for (const item of (state.items || []).filter((item: BridgeItem) => item.source === 'mac' && item.kind === 'file')) {
+        if (epoch !== this.connectionEpoch || !this.active || this.sending || AppStorage.get<boolean>('autoReceive') === false) break;
+        await this.receive(item);
+      }
+    } catch (error) {
+      if (epoch === this.connectionEpoch && !this.sending && AppStorage.get<string>('transferPhase') === 'failed') {
+        AppStorage.setOrCreate('progress', `接收未完成 · ${(error as Error).message}`);
+      }
+    } finally {
+      if (epoch === this.connectionEpoch) {
+        this.receivingQueue = false;
+        if (snapshot !== AppStorage.get<string>('stateJSON')) this.receivePending();
+      }
+    }
   }
   private connectionFailed(error: Error): void {
     AppStorage.setOrCreate('linkPhase', this.sessionRejected ? 'error' : 'offline');
@@ -237,6 +304,7 @@ export class BridgeClient {
   private discover(): void {
     if (!this.context || !this.paired || this.discovery || Date.now() - this.lastDiscovery < 15000) return;
     this.lastDiscovery = Date.now();
+    const epoch = this.connectionEpoch;
     try {
       this.discovery = mdns.createDiscoveryService(this.context, '_nearbridge._tcp');
       this.discovery.on('serviceFound', async (service: mdns.LocalServiceInfo) => {
@@ -244,11 +312,13 @@ export class BridgeClient {
         this.discoveryBusy = true;
         try {
           const resolved = await mdns.resolveLocalService(this.context, service);
+          if (epoch !== this.connectionEpoch || !this.active) return;
           const candidate = `https://${resolved.host?.address}:${resolved.port}`;
           if (!PRIVATE_URL.test(candidate)) return;
           // Discovery is untrusted. No device credential is sent until TLS
           // validates against the QR root and pinned public key.
           await this.request('/api/bootstrap', http.RequestMethod.GET, undefined, {}, candidate, true);
+          if (epoch !== this.connectionEpoch || !this.active) return;
           this.paired.url = candidate;
           this.persistPair();
           await this.refresh();
@@ -256,7 +326,10 @@ export class BridgeClient {
         finally { this.discoveryBusy = false; }
       });
       this.discovery.startSearchingMDNS();
-      setTimeout(() => { try { this.discovery?.stopSearchingMDNS(); } catch (_) {} this.discovery = undefined; }, 10000);
+      setTimeout(() => {
+        if (epoch !== this.connectionEpoch) return;
+        try { this.discovery?.stopSearchingMDNS(); } catch (_) {} this.discovery = undefined;
+      }, 10000);
     } catch (_) { this.discovery = undefined; }
   }
   async sendText(text: string): Promise<void> {
@@ -269,6 +342,9 @@ export class BridgeClient {
     await this.refreshAfterAction();
   }
   private async refreshAfterAction(): Promise<void> {
+    // A committed action wakes the pending change request. Avoid a second full
+    // snapshot before releasing the send/run button, especially over BLE.
+    if (this.active && this.revision && AppStorage.get<string>('linkPhase') === 'online') return;
     const epoch = this.connectionEpoch;
     try { await this.refresh(); }
     catch (error) {
@@ -342,25 +418,54 @@ export class BridgeClient {
     } finally {
       fs.closeSync(file); this.sending = false; this.holdScreen(-1);
       this.endProgress(progress, completed ? 'completed' : (this.cancelRequested ? 'paused' : 'failed'));
+      if (this.active) this.receivePending();
     }
   }
   async receive(item: BridgeItem): Promise<void> {
-    if (!/^[a-f0-9-]{36}$/.test(item.id) || item.kind !== 'file' || item.source !== 'mac' || !item.sha256 || item.size === undefined) return;
+    if (!/^[a-f0-9-]{36}$/.test(item.id) || item.kind !== 'file' || item.source !== 'mac' ||
+      !/^[a-f0-9]{64}$/.test(item.sha256 || '') || !Number.isSafeInteger(item.size) || item.size === undefined || item.size < 0 || item.size > 512 * 1024 * 1024) return;
+    const existing = this.receiving.get(item.id);
+    if (existing) return existing;
+    const epoch = this.connectionEpoch;
+    const pending = this.receiveOnce(item);
+    this.receiving.set(item.id, pending);
+    try { await pending; }
+    finally { if (epoch === this.connectionEpoch) this.receiving.delete(item.id); }
+  }
+  private async receiveOnce(item: BridgeItem): Promise<void> {
+    const epoch = this.connectionEpoch;
     const saved = this.saved.find((value: SavedFile) => value.id === item.id);
-    if (saved && fs.accessSync(saved.path)) {
-      if (!item.receivedAt) await this.acknowledge(item);
+    if (saved && saved.sha256 === item.sha256 && fs.accessSync(saved.path)) {
+      if (!item.receivedAt) {
+        const progress = this.beginProgress('文件已保存，正在确认收件…', 'receiving');
+        try {
+          await this.acknowledge(item);
+          this.reportProgress(progress, `${item.name || '文件'} 已保存到手机 NearBridge 收件箱`, 1);
+          this.endProgress(progress, 'completed');
+        } catch (error) {
+          this.reportProgress(progress, '文件已保存，连接恢复后确认收件', 1);
+          this.endProgress(progress, 'paused');
+          throw error as Error;
+        }
+      }
       return;
     }
     this.holdScreen(1);
     const progress = this.beginProgress(`正在接收 ${item.name || '文件'}`, 'receiving');
     let completed = false;
-    try { await this.receiveFile(item, progress); completed = true; }
+    try { await this.receiveFile(item, progress, epoch); completed = true; }
     finally {
       this.holdScreen(-1);
-      this.endProgress(progress, completed ? 'completed' : (!this.active ? 'paused' : 'failed'));
+      const stored = this.saved.some((value: SavedFile) => value.id === item.id && value.sha256 === item.sha256);
+      if (!completed && stored) this.reportProgress(progress, '文件已保存，连接恢复后确认收件', 1);
+      this.endProgress(progress, completed ? 'completed' : ((!this.active || stored) ? 'paused' : 'failed'));
     }
   }
-  private async receiveFile(item: BridgeItem, progress: number): Promise<void> {
+  private ensureActive(epoch: number): void {
+    if (epoch !== this.connectionEpoch || !this.active) throw new Error('已暂停接收，返回应用后继续');
+  }
+  private async receiveFile(item: BridgeItem, progress: number, epoch: number): Promise<void> {
+    this.ensureActive(epoch);
     if (item.size === undefined || !item.sha256) throw new Error('文件信息不完整');
     const folder = `${this.directory}/received/${item.id}`;
     if (!fs.accessSync(`${this.directory}/received`)) fs.mkdirSync(`${this.directory}/received`);
@@ -372,28 +477,36 @@ export class BridgeClient {
     // the verified file instead of downloading a second copy.
     // CoreFileKit returns uppercase hexadecimal; the wire format uses lowercase.
     if (!(fs.accessSync(target) && (await hash.hash(target, 'sha256')).toLowerCase() === item.sha256)) {
+      this.ensureActive(epoch);
       const file = fs.openSync(partial, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
       try {
         let offset = fs.statSync(file.fd).size;
         if (offset > item.size) { fs.truncateSync(file.fd, 0); offset = 0; }
         while (offset < item.size) {
-          if (!this.active) throw new Error('已暂停接收，返回应用后继续');
+          this.ensureActive(epoch);
           const end = Math.min(item.size - 1, offset + (this.bluetooth.enabled ? 64 * 1024 : CHUNK) - 1);
           const response = await this.request(`/api/files/${item.id}`, http.RequestMethod.GET, undefined, { 'Range': `bytes=${offset}-${end}` });
           const chunk = response.result as ArrayBuffer;
           if (response.responseCode !== 206 || chunk.byteLength !== end - offset + 1) throw new Error('下载分块不完整');
           let written = 0;
-          while (written < chunk.byteLength) written += fs.writeSync(file.fd, chunk.slice(written), { offset: offset + written });
+          while (written < chunk.byteLength) {
+            const count = fs.writeSync(file.fd, chunk.slice(written), { offset: offset + written });
+            if (count <= 0) throw new Error('手机存储写入中断，请检查剩余空间');
+            written += count;
+          }
           fs.fsyncSync(file.fd);
           offset += chunk.byteLength;
           this.reportProgress(progress, `接收 ${name} · ${Math.floor(offset / Math.max(1, item.size) * 100)}%`, offset / Math.max(1, item.size));
         }
       } finally { fs.closeSync(file); }
-      if ((await hash.hash(partial, 'sha256')).toLowerCase() !== item.sha256) {
+      const digest = (await hash.hash(partial, 'sha256')).toLowerCase();
+      this.ensureActive(epoch);
+      if (digest !== item.sha256) {
         fs.unlinkSync(partial); throw new Error('文件校验失败，下次连接会重新接收');
       }
       fs.renameSync(partial, target);
     }
+    this.ensureActive(epoch);
     this.saved = this.saved.filter((value: SavedFile) => value.id !== item.id);
     this.saved.push({ id: item.id, path: target, sha256: item.sha256 });
     this.write('saved.json', JSON.stringify(this.saved));

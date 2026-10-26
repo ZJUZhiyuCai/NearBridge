@@ -13,6 +13,7 @@ import {
   ensureNativeCertificate,
 } from "../src/certificate.mjs";
 import { parseShortcuts } from "../src/system.mjs";
+import { safeFilename } from "../src/store.mjs";
 
 let root, tls;
 before(() => {
@@ -144,6 +145,147 @@ async function fixture(t, extra = {}) {
   }
   return { bridge, config, request, pair, clipboard, urls, info };
 }
+
+test("adversarial: Unicode filenames fit filesystem byte limits and preserve extensions", async (t) => {
+  const { request } = await fixture(t);
+  const name = "中文📷".repeat(40) + ".jpg";
+  assert.ok(Buffer.byteLength(safeFilename(name)) <= 240);
+  assert.ok(safeFilename(name).endsWith(".jpg"));
+  const results = [];
+  for (let i = 0; i < 2; i++) {
+    const result = await request("mac", "/api/files", { method: "POST", raw: Buffer.from("test"),
+      headers: { "X-File-Name": encodeURIComponent(name), "X-File-Size": "4" } });
+    assert.equal(result.status, 201);
+    assert.ok(Buffer.byteLength(result.json.item.name) <= 255);
+    results.push(result.json.item.name);
+  }
+  assert.notEqual(results[0], results[1]);
+});
+
+test("changes: notifications wake immediately, idle replies omit history, stale revisions cannot miss changes", async (t) => {
+  const { request, pair } = await fixture(t);
+  const cookie = await pair();
+  const initial = (await request("phone", "/api/state", { cookie })).json;
+  assert.equal(typeof initial.revision, "string");
+  const waiting = request("phone", `/api/changes?since=${initial.revision}&wait=1000`, { cookie });
+  const item = (await request("mac", "/api/items", { method: "POST", body: { text: "wake up" } })).json.item;
+  const changed = await waiting;
+  assert.equal(changed.status, 200);
+  assert.equal(changed.json.state.items[0].id, item.id);
+  assert.notEqual(changed.json.revision, initial.revision);
+  const idle = await request("phone", `/api/changes?since=${changed.json.revision}&wait=10`, { cookie });
+  assert.equal(idle.status, 200);
+  assert.equal(idle.json.state, undefined);
+  assert.ok(idle.buffer.length < 128);
+  assert.equal((await request("phone", `/api/changes?since=${initial.revision}`, { cookie })).json.state.items[0].id, item.id);
+  assert.equal((await request("phone", "/api/changes?wait=999999", { cookie })).status, 400);
+  assert.equal((await request("phone", "/api/changes?wait=NaN", { cookie })).status, 400);
+  assert.equal((await request("phone", "/api/changes")).status, 401);
+});
+
+test("adversarial: session rotation closes old SSE streams even when the device ID is retained", async (t) => {
+  const { request, pair, urls, bridge } = await fixture(t);
+  const cookie = await pair();
+  const id = bridge.store.data.device.id;
+  let stream;
+  const opened = new Promise((resolve, reject) => {
+    stream = https.get(new URL("/api/events", urls.phone), { ca: tls.cert, headers: { Cookie: cookie } }, res => {
+      res.resume();
+      const closed = new Promise(done => res.once("end", done));
+      resolve(closed);
+    });
+    stream.on("error", reject);
+  });
+  // Do not assimilate the stream lifetime into the response-header promise.
+  let ended = false;
+  opened.then(() => { ended = true; });
+  t.after(() => stream.destroy());
+  await new Promise(resolve => setTimeout(resolve, 20));
+  await request("mac", "/api/pairing/native", { method: "POST", body: {} });
+  const token = new URL((await request("mac", "/api/pairing")).json.url).hash.split("=")[1];
+  const claim = (await request("phone", "/api/pair", { method: "POST", body: { token, client: "harmony-native" } })).json;
+  await request("mac", "/api/pair/approve", { method: "POST", body: { id: claim.id } });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(bridge.store.data.device.id, id);
+  assert.equal(ended, true, "rotated credentials must not retain an event subscription");
+});
+
+test("adversarial: observer connections are bounded and released on disconnect", async (t) => {
+  const { urls } = await fixture(t);
+  const streams = [];
+  t.after(() => streams.forEach(req => req.destroy()));
+  const open = () => new Promise((resolve, reject) => {
+    const req = http.get(new URL("/api/events", urls.mac), res => { res.resume(); resolve(res.statusCode); });
+    req.on("error", reject); streams.push(req);
+  });
+  for (let i = 0; i < 8; i++) assert.equal(await open(), 200);
+  assert.equal(await open(), 429);
+  streams[0].destroy();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(await open(), 200);
+});
+
+test("adversarial: an expired QR cannot be claimed by slowly completing a request body", async (t) => {
+  const { urls, request } = await fixture(t);
+  const qr = (await request("mac", "/api/pairing")).json;
+  const token = new URL(qr.url).hash.split("=")[1];
+  const body = JSON.stringify({ token });
+  let req;
+  const response = new Promise((resolve, reject) => {
+    req = https.request(new URL("/api/pair", urls.phone), {
+      ca: tls.cert, method: "POST", headers: { "X-NearBridge": "1", "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+    }, res => { res.resume(); res.once("end", () => resolve(res.statusCode)); });
+    req.on("error", reject);
+    req.write(body.slice(0, -1));
+  });
+  t.after(() => req.destroy());
+  // A separate completed request acts as an event-loop barrier after the slow body.
+  await request("phone", "/api/bootstrap");
+  const clock = t.mock.method(Date, "now", () => qr.expiresAt + 1);
+  try { req.end(body.slice(-1)); assert.equal(await response, 401); }
+  finally { clock.mock.restore(); }
+});
+
+test("adversarial: waiting snapshots reauthorize on expiry and revocation", async (t) => {
+  const { bridge, request, pair } = await fixture(t);
+  const cookie = await pair();
+  const state = (await request("phone", "/api/state", { cookie })).json;
+  const waiting = request("phone", `/api/changes?since=${state.revision}&wait=1000`, { cookie });
+  await request("mac", "/api/device/revoke", { method: "POST", body: {} });
+  const revoked = await waiting;
+  assert.equal(revoked.status, 401);
+  assert.equal(revoked.json.state, undefined);
+  const next = await pair();
+  const nextState = (await request("phone", "/api/state", { cookie: next })).json;
+  bridge.store.data.device.expiresAt = Date.now() + 20;
+  const expired = await request("phone", `/api/changes?since=${nextState.revision}&wait=50`, { cookie: next });
+  assert.equal(expired.status, 401);
+  assert.equal(expired.json.state, undefined);
+});
+
+test("adversarial: clipboard latency cannot hide a committed text or bypass capacity", async (t) => {
+  let releaseCopy;
+  const copying = new Promise(resolve => { releaseCopy = resolve; });
+  let startedCopy;
+  const copyStarted = new Promise(resolve => { startedCopy = resolve; });
+  const { request, pair, bridge } = await fixture(t, { system: {
+    writeClipboard: async () => { startedCopy(); await copying; },
+    readClipboard: async () => { bridge.store.data.items = Array.from({ length: 1000 }, (_, i) => ({ id: String(i), kind: "text" })); return "clipboard"; },
+  } });
+  const cookie = await pair();
+  await request("mac", "/api/settings", { method: "POST", body: { copyIncomingText: true } });
+  await request("phone", "/api/state", { cookie });
+  const state = (await request("mac", "/api/state")).json;
+  const observation = request("mac", `/api/changes?since=${state.revision}&wait=1000`);
+  const posted = request("phone", "/api/items", { cookie, method: "POST", body: { text: "visible before pbcopy completes" } });
+  try {
+    await copyStarted;
+    const update = await observation;
+    assert.equal(update.json.state?.items[0].text, "visible before pbcopy completes");
+  } finally { releaseCopy(); await posted; }
+  assert.equal((await request("mac", "/api/mac/clipboard/send", { method: "POST", body: {} })).status, 507);
+  assert.equal(bridge.store.data.items.length, 1000);
+});
 
 test("unpaired phones cannot read data, upload files, or run Mac actions", async (t) => {
   const { request } = await fixture(t);

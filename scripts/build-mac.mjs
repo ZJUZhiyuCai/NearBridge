@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { VERSION, BUILD_NUMBER } from "../src/version.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const app = path.join(root, "dist/NearBridge.app");
@@ -15,7 +16,14 @@ for (const name of ["src", "public", "node_modules"]) {
   fs.cpSync(path.join(root, name), target, {
     recursive: true,
     dereference: true,
+    // npm CLI shims are not used by the embedded service. Node 24 can preserve
+    // these as absolute links despite dereference, which strict codesign rejects.
+    filter: (source) => name !== "node_modules" || path.basename(source) !== ".bin",
   });
+}
+for (const entry of fs.readdirSync(bundle, { recursive: true })) {
+  if (fs.lstatSync(path.join(bundle, entry)).isSymbolicLink())
+    throw new Error(`应用运行时中出现符号链接，请先检查打包输入：${entry}`);
 }
 for (const name of ["package.json", "package-lock.json"])
   fs.copyFileSync(path.join(root, name), path.join(bundle, name));
@@ -27,8 +35,8 @@ fs.writeFileSync(
 <key>CFBundleName</key><string>NearBridge</string>
 <key>CFBundleDisplayName</key><string>NearBridge</string>
 <key>CFBundleIdentifier</key><string>local.nearbridge.mac</string>
-<key>CFBundleVersion</key><string>3</string>
-<key>CFBundleShortVersionString</key><string>0.3.0</string>
+<key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
+<key>CFBundleShortVersionString</key><string>${VERSION}</string>
 <key>CFBundleExecutable</key><string>NearBridge</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSUIElement</key><true/>
@@ -53,6 +61,8 @@ execFileSync(
     "-swift-version",
     "5",
     "-O",
+    "-target",
+    `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macosx13.0`,
     "-framework",
     "AppKit",
     "-framework",

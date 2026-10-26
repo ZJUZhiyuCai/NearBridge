@@ -14,10 +14,12 @@ struct WorkflowJob: Decodable, Identifiable {
 struct PairRequest: Decodable { let id: String; let name: String }
 struct BridgeSettings: Decodable { let copyIncomingText: Bool }
 struct BridgeState: Decodable {
+    let revision: String?
     let name: String; let version: String; let paired: Bool; let device: Device?
     let items: [BridgeItem]; let workflows: [Workflow]; let jobs: [WorkflowJob]
     let pending: PairRequest?; let settings: BridgeSettings?; let inbox: String?
 }
+struct StateUpdate: Decodable { let revision: String; let state: BridgeState? }
 struct PairingInfo: Decodable { let qr: String?; let url: String?; let fingerprint: String; let expiresAt: Double }
 struct ShortcutInfo: Decodable, Identifiable { let id: String; let name: String }
 struct ShortcutList: Decodable { let shortcuts: [ShortcutInfo] }

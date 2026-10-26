@@ -17,6 +17,7 @@ import { Store } from "./store.mjs";
 import { macSystem } from "./system.mjs";
 import { WorkflowManager } from "./workflows.mjs";
 import { TransferManager } from "./transfers.mjs";
+import { VERSION } from "./version.mjs";
 
 const PUBLIC = fileURLToPath(new URL("../public/", import.meta.url));
 const SESSION_MS = 30 * 86400000;
@@ -68,6 +69,10 @@ export function createBridge(options) {
   if (!tls?.key || !tls?.cert) throw new Error("手机连接必须使用 TLS");
   const store = new Store(dataDir, inbox);
   const clients = new Map();
+  const waiters = new Map();
+  const instance = randomUUID();
+  let sequence = 0;
+  const revision = () => `${instance}.${sequence}`;
   const attempts = new Map();
   const uploads = new Set();
   let reservedBytes = 0;
@@ -79,6 +84,8 @@ export function createBridge(options) {
   let nativeTls = options.nativeTls;
   let closing = false;
   let phoneLastSeen = 0;
+  let wasConnected = false;
+  let pendingVisible = false;
   const workflows = new WorkflowManager(store, system, broadcast, hasRoom);
   const transfers = new TransferManager(store, {
     maxFileSize,
@@ -87,8 +94,24 @@ export function createBridge(options) {
   });
 
   function broadcast() {
-    for (const [res] of clients)
-      if (!res.writableEnded) res.write(`event: change\ndata: {}\n\n`);
+    sequence++;
+    for (const [res, client] of clients) {
+      if (!client.valid()) { res.end(); continue; }
+      // A stalled reader must not accumulate an unbounded notification queue.
+      if (!res.writableEnded && !res.write(`event: change\ndata: {}\n\n`)) res.destroy();
+    }
+    for (const waiter of [...waiters.values()]) waiter.finish(true);
+  }
+
+  function observerRoom(role) {
+    const count = [...clients.values(), ...waiters.values()].filter(client => client.role === role).length;
+    if (count >= 8) throw fail(429, "连接过多，请关闭多余的 NearBridge 页面后重试");
+  }
+  function phoneConnected() {
+    const device = store.data.device;
+    return Boolean(device && device.expiresAt > Date.now() &&
+      (Date.now() - phoneLastSeen < 12000 ||
+        [...clients.values(), ...waiters.values()].some(client => client.role === "phone" && client.valid())));
   }
 
   function requireMac(role) {
@@ -129,20 +152,14 @@ export function createBridge(options) {
   }
   function state(role, device) {
     const currentDevice = store.data.device;
-    const connected =
-      Boolean(currentDevice) &&
-      (Date.now() - phoneLastSeen < 12000 ||
-        [...clients.values()].some(
-          (client) =>
-            client.deviceId === currentDevice?.id && client.role === "phone",
-        ));
     return {
+      revision: revision(),
       role,
       name,
-      version: "0.3.0",
+      version: VERSION,
       paired: Boolean(currentDevice && currentDevice.expiresAt > Date.now()),
       device: currentDevice
-        ? { id: currentDevice.id, name: currentDevice.name, connected }
+        ? { id: currentDevice.id, name: currentDevice.name, connected: phoneConnected() }
         : null,
       items: store.data.items
         .filter((item) => accessible(item, role, device))
@@ -206,7 +223,7 @@ export function createBridge(options) {
       return;
     }
     if (method === "GET" && pathname === "/health") {
-      json(res, 200, { ok: true, app: "NearBridge", version: "0.3.0" });
+      json(res, 200, { ok: true, app: "NearBridge", version: VERSION });
       return;
     }
     if (!pathname.startsWith("/api/")) throw fail(404, "页面不存在");
@@ -219,7 +236,11 @@ export function createBridge(options) {
     )
       throw fail(403, "请求缺少客户端标识");
     const device = role === "phone" ? deviceFor(req) : null;
-    if (device) phoneLastSeen = Date.now();
+    if (device) {
+      const connected = phoneConnected();
+      phoneLastSeen = Date.now();
+      if (!connected) { wasConnected = true; broadcast(); }
+    }
     if (method === "GET" && pathname === "/api/bootstrap") {
       json(res, 200, {
         role,
@@ -231,7 +252,7 @@ export function createBridge(options) {
     }
 
     if (method === "POST" && pathname === "/api/pair" && role === "phone") {
-      const now = Date.now();
+      let now = Date.now();
       const ip = req.socket.remoteAddress;
       const attempt = attempts.get(ip) || { count: 0, resetAt: now + 60000 };
       if (attempt.resetAt < now) {
@@ -239,9 +260,11 @@ export function createBridge(options) {
         attempt.resetAt = now + 60000;
       }
       attempt.count++;
+      if (!attempts.has(ip) && attempts.size >= 256) throw fail(429, "配对请求过多，请稍后重试");
       attempts.set(ip, attempt);
       if (attempt.count > 10) throw fail(429, "尝试过于频繁，请一分钟后重试");
       const body = await readJSON(req);
+      now = Date.now(); // A slow body must not extend the QR token's lifetime.
       const native = body.client === "harmony-native";
       if (
         store.data.device &&
@@ -412,26 +435,51 @@ export function createBridge(options) {
       json(res, 200, state(role, device));
       return;
     }
+    if (method === "GET" && pathname === "/api/changes") {
+      const rawWait = url.searchParams.get("wait") || "25000";
+      if (!/^\d+$/.test(rawWait) || Number(rawWait) < 1 || Number(rawWait) > 25000)
+        throw fail(400, "等待时间无效");
+      const since = url.searchParams.get("since");
+      if (since !== revision()) {
+        json(res, 200, { revision: revision(), state: state(role, device) });
+        return;
+      }
+      observerRoom(role);
+      let timer;
+      const cleanup = () => { clearTimeout(timer); waiters.delete(res); };
+      const finish = (changed) => {
+        cleanup();
+        if (res.destroyed || res.writableEnded) return;
+        try {
+          authorize(); // Recheck the exact credential, including same-device rotation.
+          if (role === "phone") phoneLastSeen = Date.now();
+          json(res, 200, { revision: revision(), ...(changed ? { state: state(role, device) } : {}) });
+        } catch (error) { json(res, error.status || 500, { error: error.message }); }
+      };
+      waiters.set(res, { role, valid: () => role === "mac" || Boolean(deviceFor(req)), finish });
+      timer = setTimeout(() => finish(false), Number(rawWait));
+      res.once("close", cleanup);
+      return;
+    }
     if (method === "GET" && pathname === "/api/events") {
+      observerRoom(role);
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       });
-      clients.set(res, { role, deviceId: device?.id });
+      clients.set(res, { role, deviceId: device?.id, valid: () => role === "mac" || Boolean(deviceFor(req)) });
       res.write("event: change\ndata: {}\n\n");
       broadcast();
       const heartbeat = setInterval(() => {
         if (
           role === "phone" &&
-          (!store.data.device ||
-            store.data.device.id !== device.id ||
-            store.data.device.expiresAt < Date.now())
+          !deviceFor(req)
         ) {
           res.end();
           return;
         }
-        res.write(": heartbeat\n\n");
+        if (!res.write(": heartbeat\n\n")) res.destroy();
       }, 15000);
       res.once("close", () => {
         clearInterval(heartbeat);
@@ -460,7 +508,7 @@ export function createBridge(options) {
               width: 280,
               margin: 2,
               errorCorrectionLevel: "M",
-              color: { dark: "#1d3029", light: "#ffffff" },
+              color: { dark: "#1d1d1f", light: "#ffffff" },
             })
           : null,
         fingerprint: tls.fingerprint,
@@ -527,6 +575,7 @@ export function createBridge(options) {
         throw fail(409, "配对请求已失效");
       pending.status = pathname.endsWith("/approve") ? "approved" : "rejected";
       if (pending.status === "approved") {
+        phoneLastSeen = 0;
         pending.session = token();
         store.data.device = {
           id: pending.previousDeviceId || randomUUID(),
@@ -577,6 +626,7 @@ export function createBridge(options) {
       const text = validatedText(body.text);
       hasRoom();
       const item = store.addText(text, role, store.data.device?.id);
+      broadcast(); // Persisted text is visible immediately, even if pbcopy is slow.
       let clipboardCopied = false;
       if (role === "phone" && store.data.settings.copyIncomingText) {
         try {
@@ -586,7 +636,6 @@ export function createBridge(options) {
           /* Saved even if macOS rejects the clipboard operation. */
         }
       }
-      broadcast();
       json(res, 201, { item, clipboardCopied });
       return;
     }
@@ -694,8 +743,9 @@ export function createBridge(options) {
     }
     if (method === "POST" && pathname === "/api/mac/clipboard/send") {
       requireMac(role);
-      hasRoom();
       const text = validatedText(await system.readClipboard());
+      authorize();
+      hasRoom(); // Capacity may have changed while awaiting the OS clipboard.
       const item = store.addText(text, "mac", store.data.device?.id);
       broadcast();
       json(res, 201, { item });
@@ -783,6 +833,10 @@ export function createBridge(options) {
       )
     : null;
   const servers = [local, remote, ...(native ? [native] : [])];
+  for (const server of servers) {
+    server.maxConnections = 64;
+    server.keepAliveTimeout = 30000;
+  }
   if (native) {
     native.requestTimeout = 10 * 60000;
     native.headersTimeout = 15000;
@@ -794,6 +848,15 @@ export function createBridge(options) {
       if (attempt.resetAt < Date.now()) attempts.delete(ip);
   }, 60000);
   cleanup.unref();
+  const presence = setInterval(() => {
+    const connected = phoneConnected();
+    const visible = Boolean(pending?.status === "pending" && pending.expiresAt > Date.now());
+    const expiredObserver = [...clients.values(), ...waiters.values()].some(client => !client.valid());
+    if (connected !== wasConnected || visible !== pendingVisible || expiredObserver) {
+      wasConnected = connected; pendingVisible = visible; broadcast();
+    }
+  }, 1000);
+  presence.unref();
   async function listen(server, port, host) {
     await new Promise((resolve, reject) => {
       server.once("error", reject);
@@ -833,12 +896,15 @@ export function createBridge(options) {
         remote.close();
         native?.close();
         clearInterval(cleanup);
+        clearInterval(presence);
         throw error;
       }
     },
     async close() {
       closing = true;
       clearInterval(cleanup);
+      clearInterval(presence);
+      for (const waiter of [...waiters.values()]) waiter.finish(false);
       for (const [res] of clients) res.end();
       for (const upload of uploads) upload.abort.abort();
       await workflows.close();

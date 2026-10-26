@@ -8,7 +8,19 @@ export function safeFilename(value) {
     .replace(/[\\/\x00-\x1f\x7f:]/g, "_")
     .replace(/^\.+/, "")
     .trim();
-  return [...name].slice(0, 160).join("") || "未命名文件";
+  // Filesystems limit bytes, not JS characters. Leave room for collision suffixes.
+  const truncate = (text, limit) => {
+    let result = "", bytes = 0;
+    for (const char of text) {
+      bytes += Buffer.byteLength(char);
+      if (bytes > limit) break;
+      result += char;
+    }
+    return result;
+  };
+  const extension = path.extname(name);
+  const suffix = truncate(extension, 32);
+  return truncate(name.slice(0, name.length - extension.length), 240 - Buffer.byteLength(suffix)) + suffix || "未命名文件";
 }
 
 export class Store {
