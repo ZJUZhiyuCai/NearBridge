@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import * as module from "node:module";
 import vm from "node:vm";
+import { createHash } from "node:crypto";
 
 // Exercise the actual non-UI ArkTS client with in-memory platform adapters.
 // No phone, real filesystem, Bluetooth radio or network is used.
@@ -17,15 +18,23 @@ function fixture(respond, bluetooth = false, fileSize = 0) {
   const storage = new Map();
   const requests = [];
   let bluetoothConnections = 0;
+  let destroyedRequests = 0;
   const fileIO = {
     OpenMode: { CREATE: 1, READ_WRITE: 2, TRUNC: 4, READ_ONLY: 8 },
     accessSync: (path) => path === root || files.has(path),
-    mkdirSync() {},
+    mkdirSync(path) { files.set(path, ""); },
     readTextSync(path) { if (!files.has(path)) throw new Error("missing"); return files.get(path); },
-    openSync: (path) => ({ fd: path }),
-    statSync: () => ({ size: fileSize, mtime: 123 }),
+    openSync(path, mode) { if (mode & 1 && !files.has(path)) files.set(path, Buffer.alloc(0)); return { fd: path }; },
+    statSync: (path) => ({ size: files.has(path) ? Buffer.byteLength(files.get(path)) : fileSize, mtime: 123 }),
     readSync: (_fd, buffer) => buffer.byteLength,
-    writeSync(fd, value) { files.set(fd, value); return value.length; },
+    writeSync(fd, value, options) {
+      if (typeof value === "string") { files.set(fd, value); return value.length; }
+      const data = Buffer.from(value), offset = options?.offset || 0;
+      const old = Buffer.from(files.get(fd) || []), next = Buffer.alloc(Math.max(old.length, offset + data.length));
+      old.copy(next); data.copy(next, offset); files.set(fd, next); return data.length;
+    },
+    unlinkSync(path) { files.delete(path); },
+    truncateSync(path, length) { files.set(path, Buffer.from(files.get(path)).subarray(0, length)); },
     fsyncSync() {}, closeSync() {},
     renameSync(from, to) { files.set(to, files.get(from)); files.delete(from); },
   };
@@ -34,13 +43,16 @@ function fixture(respond, bluetooth = false, fileSize = 0) {
     fs: fileIO,
     http: {
       RequestMethod: { GET: "GET", POST: "POST", PUT: "PUT" }, HttpDataType: { ARRAY_BUFFER: 1 },
-      createHttp: () => ({
-        async request(url, options) {
+      createHttp: () => {
+        let cancel;
+        const aborted = new Promise((_, reject) => { cancel = reject; });
+        return { async request(url, options) {
           requests.push({ url, options });
-          const body = await respond(url, options);
+          const body = await Promise.race([respond(url, options), aborted]);
+          if (body && typeof body.responseCode === "number") return body;
           return { responseCode: 200, result: new TextEncoder().encode(JSON.stringify(body)).buffer };
-        }, destroy() {},
-      }),
+        }, destroy() { destroyedRequests++; cancel(new Error("HTTP task destroyed")); } };
+      },
     },
     util: { TextDecoder: class { decodeToString(bytes) { return new TextDecoder().decode(bytes); } }, generateRandomUUID: () => "00000000-0000-4000-8000-000000000001" },
     BluetoothTunnel: {
@@ -49,15 +61,16 @@ function fixture(respond, bluetooth = false, fileSize = 0) {
     },
     BLUETOOTH_URL: "https://127.0.0.1:53320",
     window: { getLastWindow: async () => ({ setWindowKeepScreenOn: async () => {} }) },
+    hash: { hash: async (path) => createHash("sha256").update(Buffer.from(files.get(path) || [])).digest("hex").toUpperCase() },
     mdns: { createDiscoveryService: () => ({ on() {}, startSearchingMDNS() {}, stopSearchingMDNS() {} }) },
-    setInterval: () => 1, clearInterval() {}, setTimeout, Uint8Array, ArrayBuffer,
+    setInterval: () => 1, clearInterval() {}, setTimeout, clearTimeout, Uint8Array, ArrayBuffer,
   });
   const source = fs.readFileSync(new URL("../harmony/entry/src/main/ets/core/BridgeClient.ets", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "").replace("export class BridgeClient", "class BridgeClient");
   const Client = new vm.Script(module.stripTypeScriptTypes(source) + "\nBridgeClient;").runInContext(context);
   const client = new Client();
   client.init({ filesDir: "/sandbox" });
-  return { client, storage, files, requests, get bluetoothConnections() { return bluetoothConnections; } };
+  return { client, storage, files, requests, fileIO, get bluetoothConnections() { return bluetoothConnections; }, get destroyedRequests() { return destroyedRequests; } };
 }
 
 const qr = JSON.stringify({ protocol: "nearbridge", version: 2, name: "New Mac", url: "https://192.168.1.3:53320", token: "a".repeat(43), certificate: "A".repeat(400), publicKeyHash: "A".repeat(43) + "=" });
@@ -87,12 +100,12 @@ test("failed re-pairing restores the previous Mac and Bluetooth choice", { skip 
 
 test("a failed old refresh cannot overwrite the status after switching transports", { skip }, async () => {
   const f = fixture(async () => ({}), true);
-  let rejectRefresh;
-  f.client.refresh = () => new Promise((_, reject) => { rejectRefresh = reject; });
+  const rejects = [];
+  f.client.refresh = () => new Promise((_, reject) => { rejects.push(reject); });
   f.client.start();
   f.client.useLocalNetwork();
   const current = f.storage.get("status");
-  rejectRefresh(new Error("old Bluetooth connection closed"));
+  rejects[0](new Error("old Bluetooth connection closed"));
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(f.storage.get("status"), current);
   assert.equal(f.storage.get("linkPhase"), "connecting");
@@ -144,4 +157,118 @@ test("pausing an upload keeps it queued and ends the progress indicator without 
   assert.equal(f.storage.get("transferPhase"), "paused");
   assert.equal(f.storage.get("progressFraction"), -1);
   assert.equal(f.requests.filter((request) => request.url.endsWith("/complete")).length, 0);
+});
+
+test("stopping the phone cancels pending HTTP immediately and a new foreground sync is not blocked", { skip }, async () => {
+  const f = fixture(async () => new Promise(() => {}));
+  f.client.start();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.requests.length, 1);
+  f.client.stop();
+  f.client.start();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.destroyedRequests, 1);
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.storage.get("linkPhase"), "connecting");
+  f.client.stop();
+});
+
+test("out-of-order state snapshots cannot roll back an already observed revision", { skip }, async () => {
+  const resolvers = [];
+  const f = fixture(async () => new Promise(resolve => resolvers.push(resolve)));
+  const first = f.client.refresh(), second = f.client.refresh();
+  const state = { name: "Mac", items: [], workflows: [], jobs: [] };
+  resolvers[1]({ ...state, revision: "boot.12", name: "new" }); await second;
+  resolvers[0]({ ...state, revision: "boot.11", name: "old" }); await first;
+  assert.equal(JSON.parse(f.storage.get("stateJSON")).name, "new");
+});
+
+test("a foreground action with an active revision does not wait for a redundant full snapshot", { skip }, async () => {
+  const f = fixture(async (url) => url.endsWith("/api/state") ? { revision: "boot.1", items: [], workflows: [], jobs: [] } : {});
+  await f.client.refresh();
+  f.client.active = true;
+  await f.client.sendText("fast");
+  assert.deepEqual(f.requests.map(request => new URL(request.url).pathname), ["/api/state", "/api/items"]);
+  f.client.stop();
+});
+
+test("changes polling sends a revision and keeps history when the heartbeat has no snapshot", { skip }, async () => {
+  let finish;
+  const f = fixture(async url => url.includes("/api/changes") ? new Promise(resolve => { finish = resolve; }) :
+    { revision: "boot.7", name: "Mac", items: [], workflows: [], jobs: [] });
+  await f.client.refresh();
+  f.client.start();
+  assert.match(f.requests[1].url, /\/api\/changes\?since=boot.7$/);
+  const previous = f.storage.get("stateJSON");
+  finish({ revision: "boot.7" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.storage.get("stateJSON"), previous);
+  assert.equal(f.storage.get("linkPhase"), "online");
+  f.client.stop();
+});
+
+const payload = Buffer.from("verified phone file");
+const receivedItem = { id: "11111111-2222-4333-8444-555555555555", kind: "file", source: "mac", name: "sample.bin",
+  size: payload.length, sha256: createHash("sha256").update(payload).digest("hex"), createdAt: "test" };
+const fileResponse = () => ({ responseCode: 206, result: Uint8Array.from(payload).buffer });
+
+test("simultaneous manual and automatic receives share one download and one receipt", { skip }, async () => {
+  let finish;
+  const f = fixture(async url => url.includes("/api/files/") ? new Promise(resolve => { finish = resolve; }) : {});
+  f.client.active = true;
+  const first = f.client.receive(receivedItem), second = f.client.receive(receivedItem);
+  finish(fileResponse());
+  await Promise.all([first, second]);
+  assert.equal(f.requests.filter(request => request.url.includes("/api/files/")).length, 1);
+  assert.equal(f.requests.filter(request => request.url.endsWith("/received")).length, 1);
+  assert.equal(f.storage.get("transferPhase"), "completed");
+  assert.deepEqual(f.files.get(f.client.savedPath(receivedItem.id)), payload);
+  f.client.stop();
+});
+
+test("a lost receipt leaves the verified file intact and retry does not download it again", { skip }, async () => {
+  let failReceipt = true;
+  const f = fixture(async url => {
+    if (url.includes("/api/files/")) return fileResponse();
+    if (failReceipt) throw new Error("receipt connection lost");
+    return {};
+  });
+  f.client.active = true;
+  await assert.rejects(f.client.receive(receivedItem), /receipt connection lost/);
+  assert.equal(f.storage.get("transferPhase"), "paused");
+  assert.deepEqual(f.files.get(f.client.savedPath(receivedItem.id)), payload);
+  failReceipt = false;
+  await f.client.receive(receivedItem);
+  assert.equal(f.storage.get("transferPhase"), "completed");
+  assert.equal(f.requests.filter(request => request.url.includes("/api/files/")).length, 1);
+  f.client.stop();
+});
+
+test("zero-byte filesystem writes fail instead of spinning forever or issuing a false receipt", { skip }, async () => {
+  const f = fixture(async () => fileResponse());
+  f.fileIO.writeSync = () => 0;
+  f.client.active = true;
+  await assert.rejects(f.client.receive(receivedItem), /存储写入中断/);
+  assert.equal(f.requests.filter(request => request.url.endsWith("/received")).length, 0);
+  assert.equal(f.storage.get("transferPhase"), "failed");
+  f.client.stop();
+});
+
+test("a blocked file download cannot block a workflow state notification", { skip }, async () => {
+  let notification;
+  const initial = { revision: "boot.1", name: "Mac", items: [receivedItem], workflows: [], jobs: [] };
+  const f = fixture(async url => {
+    if (url.includes("/api/changes")) return new Promise(resolve => { notification = resolve; });
+    if (url.includes("/api/files/")) return new Promise(() => {});
+    return initial;
+  });
+  try {
+    f.client.start();
+    for (let i = 0; !notification && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.ok(notification, "notification request must start while the file is blocked");
+    assert.equal(f.requests.filter(request => request.url.includes("/api/files/")).length, 1);
+    notification({ revision: "boot.2", state: { ...initial, revision: "boot.2", jobs: [{ id: "job", status: "succeeded" }] } });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(JSON.parse(f.storage.get("stateJSON")).jobs[0].status, "succeeded");
+  } finally { f.client.stop(); }
 });

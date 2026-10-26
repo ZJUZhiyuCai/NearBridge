@@ -1,0 +1,33 @@
+name: Bug report / 问题反馈
+description: 连接、传输、界面或工作流没有按预期工作
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: "安全漏洞请先阅读 SECURITY.md。请勿上传配对二维码、令牌、签名材料、完整收件记录或私人文件。"
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境与连接方式
+      description: NearBridge 版本或 commit、macOS、手机型号与 HarmonyOS 版本、局域网或 BLE。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 最小复现步骤
+      placeholder: "1. …\n2. …"
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 预期结果与实际结果
+      description: 涉及延迟时，说明从哪个动作计时、到哪个状态结束；注明是否在真机上测量。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏证据
+      description: 错误文字、最小日志或合成测试文件的大小与哈希。

@@ -1,3 +1,19 @@
+# 0.4 验证记录
+
+2026-10-26。响应速度、生命周期与对抗性修复，仓库采用 MIT 并补齐贡献、安全、协议和测试文档。
+
+- `npm test`：44 项通过、0 失败、0 跳过。覆盖 HTTP/TLS、真实 Swift BLE 帧编码、实际 ArkTS 业务源码（平台 API 为内存适配器）；新增慢请求过期、会话轮换、通知连接上限、长中文文件名、回执重试、重复接收与后台请求取消等回归。
+- `npm run check`、`git diff --check`：通过。检查所有 JS/MJS 语法、版本一致性、仓库私有路径/常见凭据和本地文档链接。
+- `npm run build:mac`、严格签名校验：通过。`vtool -show-build` 核对 Mach-O 的 `minos 13.0`，不只是 Info.plist 声明。
+- `npm run build:phone`：严格 ArkTS 编译、打包、SignHap 通过。版本 `0.4.0 / 400`；本机更新包 `dist/NearBridge-0.4.0.hap`，SHA-256 `3420c7b87402411eebd75e06fecbc62115e63f43cfe409dc4ca394b28ef1ed63`。原有 SDK 潜在异常/权限兼容性警告仍保留，没有关闭检查。
+- `npm audit --omit=dev --audit-level=high`：0 vulnerabilities（本轮观测）。
+- 本机回环 HTTP/HTTPS 基准：Mac 状态可见延迟 p50 从 1001.16 ms 降到 0.98 ms；手机协议观察端从 1502.81 ms 降到 1.44 ms。各 6 个样本，非真机/无线性能；完整环境、边界和原始合成数据见 [性能记录](PERFORMANCE.md)。
+- **未完成真机验收**：0.4 手机布局、实际 LAN/BLE 延迟与吞吐、系统分享及完整故障恢复矩阵。0.2 历史设备证据不算作新版通过。
+
+[对抗性审查](ADVERSARIAL-REVIEW.md) · [测试矩阵](TESTING.md)
+
+---
+
 # 0.3 验证记录
 
 2026-10-26，机主带走手机后的本机集成。原 0.2 真机记录保留在下方。

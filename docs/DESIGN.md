@@ -2,6 +2,8 @@
 
 日常路径以原生端为主：Finder 分享/拖拽 → Mac 发送队列 → 已配对手机收件箱。Mac 使用 SwiftUI + AppKit，手机使用 ArkTS + ArkUI。网页继续兼容已有会话。
 
+项目入口见 [架构图与模块职责](ARCHITECTURE.md)、[协议契约](PROTOCOL.md) 和 [验证矩阵](TESTING.md)。
+
 ## Mac
 
 `macos/Models.swift` 定义协议模型；`BridgeModel.swift` 管理状态、文件/文件夹队列和续传；`BridgeView.swift` 与 `BridgeDesign.swift` 实现侧边栏、对话式互传、快捷指令磁贴、分组设备设置；`NearBridge.swift` 负责窗口、菜单栏、全局快捷键、Finder Services、Bonjour 和本地服务生命周期。
@@ -24,7 +26,7 @@ Mac 每 8 秒检查网络地址，必要时重新签发叶证书、热更新原�
 
 ## 鸿蒙生命周期
 
-UIAbility 管理主页面，ShareExtensionAbility 在系统分享面板中展示发送页。默认扫码使用 Scan Kit 的系统 UI；粘贴使用 PasteButton。主页面前台轮询与自动接收，进入后台停止轮询，未完成下载保留 `.part`。不以空音频、无限后台服务等方式保活。
+UIAbility 管理主页面，ShareExtensionAbility 在系统分享面板中展示发送页。默认扫码使用 Scan Kit 的系统 UI；粘贴使用 PasteButton。0.4 主页面前台等待变更通知，文件接收独立运行；进入后台取消 HTTP 请求，未完成下载保留 `.part`。旧服务不支持 revision 时保留轮询兼容。不以空音频、无限后台服务等方式保活。
 
 手机工程需要官方 SDK 编译、账号签名和真机测试；未通过这些阶段前，其系统集成能力只算源码实现。
 

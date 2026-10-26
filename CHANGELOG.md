@@ -1,0 +1,37 @@
+# Changelog
+
+## 0.4.0 — 2026-10-26
+
+### Responsiveness
+
+- Native clients wait for changes instead of polling full history every 2/3 seconds. Idle responses contain only a revision; state changes wake pending requests immediately.
+- Phone transfers run independently of state notifications. A committed action no longer waits for a redundant state snapshot.
+- Backgrounding or changing transports cancels active phone HTTP tasks. Reconnects use bounded backoff; old snapshots cannot roll state back.
+
+### Reliability and security
+
+- Close event subscriptions when credentials rotate, including migrations that retain the device ID. Reauthorize delayed snapshots before delivery.
+- Bound notification clients and HTTP connections; drop slow SSE readers. Recheck QR expiry after reading the request body.
+- Limit filenames by UTF-8 bytes while preserving extensions and collision suffixes.
+- Deduplicate simultaneous receives, preserve files when only acknowledgement fails, and fail zero-progress disk writes.
+- Publish saved text before waiting for clipboard completion; recheck clipboard-send capacity after the asynchronous OS read.
+
+### Repository
+
+- MIT license, contributor/security policies, issue and PR templates, code ownership, architecture/protocol/testing documents, and reproducible latency benchmark.
+- CI for Node 22/24/26 on Linux plus Swift compilation and signature validation on macOS. Actions are pinned to verified commit SHAs and receive read-only repository permissions.
+- Centralized server/Mac version metadata, full JavaScript syntax checks, version checks, tracked-secret/path checks, and local documentation-link validation.
+
+Phone hardware latency, BLE throughput, and 0.4 device fault recovery remain pending. See the [test matrix](docs/TESTING.md).
+
+## 0.3.0 — 2026-10-26
+
+- Claude-designed blue/white/gray native interfaces, Mac sidebar and conversation feed, phone single-home layout and connection sheet.
+- Structured connection/transfer states, pairing rollback, and successful-action refresh handling.
+- Local builds completed; see [0.3 delivery record](docs/REDESIGN-0.3.md) for its hardware validation boundary.
+
+## 0.2.0 — 2026-10-25–26
+
+- Native macOS/HarmonyOS clients, system sharing, private-CA pairing, resumable files, SHA-256 receipts, and approved Mac workflows.
+- Experimental BLE TLS tunnel; small file round trips and a phone-triggered Mac workflow verified on real hardware.
+- [Historical verification](docs/VERIFICATION.md) and [BLE evidence](docs/BLUETOOTH.md).

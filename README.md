@@ -1,84 +1,99 @@
-# NearBridge 0.3
+# NearBridge
 
-为 **Mate 70 Pro+ / HarmonyOS 6 + Mac** 做的个人局域网互联工具。
+**Mac 与 HarmonyOS 的原生互联工具。文件、文字、快捷指令，直接在两台设备之间流动。**
 
-0.3 由 Claude 负责产品体验和原生界面重塑，Codex 负责后端、集成与验证：蓝白灰主题，Mac 侧边栏与对话式互传，手机单首页与连接设置弹层。Mac 已安装运行；鸿蒙签名更新包已生成，待机主傍晚带回手机后覆盖安装、验收。0.2 的配对、双向互传、分享和蓝牙小文件/工作流已有真机证据，不能替代 0.3 的回归验收。见 [本次更新](docs/REDESIGN-0.3.md) 和 [验证记录](docs/VERIFICATION.md)。
+SwiftUI / AppKit · ArkTS / ArkUI · 局域网 HTTPS · 实验性 BLE · MIT
 
-## Mac 直接用
+[使用](#日常使用) · [构建](#从源码开始) · [架构](docs/ARCHITECTURE.md) · [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) · [更新记录](CHANGELOG.md)
 
-安装位置：`~/Applications/NearBridge.app`。
+NearBridge 为 Mac 和华为手机提供系统分享、双向文件收发及手机触发 Mac 工作流。不需要微信或云端中转。项目目前处于实验阶段，以 Mate 70 Pro+ / HarmonyOS 6 和 Apple Silicon Mac 为主要验证环境。
 
-- 点击菜单栏 **NB**，打开原生收发窗口；右键图标打开菜单。
-- **Control + Option + 空格**随时唤出窗口。
-- 拖入多个文件，或点输入栏的“＋”；文件夹自动打包为 ZIP。
-- Finder 右键文件 → **发送到 NearBridge**。部分系统会放在“服务”子菜单。
-- 发送文字、链接或当前文字剪贴板；在记录中复制文字、打开链接、显示文件。
-- “快捷指令”里运行内置动作，或添加自己选择的 Mac 快捷指令。
-- 关闭窗口后菜单栏继续运行；退出 App 才停止它启动的连接服务。
+## 当前能力
 
-手机离线时，Mac 可以先暂存文件，记录显示“等待手机收取”。**“手机已收取”仅在原生手机端保存并校验后确认**。旧网页的下载行为不会被误报为已落盘。
+| 能力 | 状态 |
+| --- | --- |
+| Mac 菜单栏、原生窗口、Finder 服务、文件夹打包 | 已实现；原生交互已有本机验证 |
+| 鸿蒙系统扫码、照片/文件选择、图库分享、手机快捷指令 | 0.2 已有真机证据；新版本需回归 |
+| 双向文件、断点续传、SHA-256 收件回执 | 已实现；小文件真机通过，完整故障矩阵待测 |
+| BLE 文字、小文件及 Mac 工作流 | 测试版；0.2 已有真实双向校验和工作流证据 |
+| 0.3 苹果风格界面、0.4 即时状态通知 | 两端原生实现；手机新版体验和延迟待真机验收 |
+| 锁屏后台常驻、投屏、通知镜像、Wi-Fi Direct/AWDL | 未实现 |
 
-当前单文件上限 512 MB，总暂存上限 2 GB，最多 1000 条记录；界面显示最近 200 条。4 MB 分块、断点续传、同名自动编号、SHA-256 校验。Mac 待发队列在重启后保留，点“继续”恢复。原文件被修改时要求重新选择。
+**0.4 的重点是响应速度和可靠性。** 原生两端改为等待服务端变更，状态变化立即返回，空闲时不重复拉取完整历史。手机切后台或换连接会取消旧请求，传文件时仍可更新工作流状态。可复现的本机基准和测量边界见 [性能记录](docs/PERFORMANCE.md)；本机回环结果不代表手机或蓝牙延迟。
 
-## 鸿蒙原生端
+## 日常使用
 
-工程在 [harmony](harmony/README.md)，包含：
+首次在 Mac 显示配对二维码，用手机 NearBridge 扫描，再在 Mac 批准。证书与公钥随配对绑定，日常使用无需打开网页。
 
-- 系统扫码配对：绑定 Mac 的私有根证书和公钥；不安装系统证书、不关闭 TLS 校验。
-- 系统分享面板“发送到 Mac”：文件/照片/文字从原 App 直接发送。
-- 原生文件与照片选择器、文字粘贴安全控件。
-- 前台自动收取 Mac 文件，校验后写入手机私有收件箱；“另存为”导出到所选目录。
-- 分块上传、下载恢复、真实收件回执。
-- Bonjour/mDNS 重新发现已配对 Mac，通过证书验证身份。
-- 手机一键运行 Mac 已启用的工作流，并查看结果。
+- **手机 → Mac**：图库或文件 App → 分享 → **发送到 Mac**；也可在 NearBridge 首页选照片、文件或发文字。
+- **Mac → 手机**：拖文件到 NearBridge，或 Finder 右键 → 服务 → **发送到 NearBridge**。手机保持 NearBridge 前台即可自动收件，之后可“另存为”。
+- **手机控制 Mac**：首页“快捷指令”中点 **打开收件目录**，或运行你在 Mac 明确启用的快捷指令。
+- **唤出 Mac 窗口**：菜单栏 **NB**，或 **Control + Option + 空格**。
+- **蓝牙**：首次扫码配对后，在 Mac 设置开启蓝牙；手机右上角 **··· → 连接与设置 → 蓝牙** 选择 Mac。不会在失败时暗中改用 Wi-Fi。
 
-Mac 点左上角手机卡片 →“重新配对手机”显示原生二维码；未配对时点“显示配对码”。当前网页配对可以迁移，**Mac 批准后保留同一设备及历史，旧网页会话退出**。现有配对不会因安装新版 Mac App 自动解除。
+Mac 离线或手机未打开时，文件可先进入 Mac 待发队列。“手机已收取”表示手机已保存并验证文件，不等于“加入队列”。手机当前需要前台运行，Mac 需要保持唤醒。蓝牙适合小文件和操作指令；照片合集和视频优先用局域网。
 
-日常使用：手机从图库分享 → **发送到 Mac**；Mac 拖入文件后，打开手机 NearBridge 即可自动收取；手机首页 **快捷指令 → 打开收件目录** 可一键执行。手机收到的文件在 NearBridge 内点“另存为”导出。开发安装使用的无线调试无需一直开启。
+## 从源码开始
 
-当前手机原生设计在前台收取；离开 App 暂停，回来继续。锁屏后台常驻、Wi-Fi Direct、AirDrop 私有协议、投屏、通知镜像与远程唤醒尚未实现。局域网模式要求同一网络；首次配对后也可选下面的 BLE 模式。Mac 需保持唤醒。扫码和图库系统分享已实测；更换局域网后自动发现、传输中断恢复和大文件极限仍须进一步真机验收。
+### Mac
 
-## 蓝牙直传（测试版）
-
-已实测通过 **Mac → 手机小文件、手机 → Mac → 手机双向文件自检、手机一键工作流**。首次扫码配对后，在 Mac 左上角手机卡片中打开“允许手机用蓝牙连接”，手机右上角“···”→“连接与设置”→“蓝牙”选择 Mac；选择会保留，下次打开尝试自动连接。业务数据通过 BLE 传输，不要求同一 Wi-Fi。失败时可“重新连接蓝牙”或明确“切回局域网”，不会把 Wi-Fi 传输误报为蓝牙。
-
-手机目前需保持前台；正在传输时窗口保持亮屏，完成或退到后台后恢复正常锁屏。连接与设置里可一键检查双向连接，会在 Mac 留下一份 32 KB 测试文件。此前发生过 Mac 系统蓝牙死锁，恢复后本轮小文件及工作流验证期间未复现；异常后停止自动重试。大文件与长期稳定性尚待验收。详见 [蓝牙记录](docs/BLUETOOTH.md)。
-
-## 构建与安装
-
-本机依赖 Node.js 22+ 与 Apple Command Line Tools。Mac App 复用 `/opt/homebrew/bin/node` 或 `/usr/local/bin/node`，当前未打包独立 Node 运行时。
-
-仓库保存 Mac / HarmonyOS 源码、测试、构建脚本和验证文档。签名与设备配置、配对凭据、收发数据、本机日志和截图、已签名安装包均留在本机，不随代码上传。文档中的安装和真机验证记录描述开发机上的历史结果；克隆仓库不会自动获得这些配置或设备授权。Node.js 22.13+ 可运行全部手机客户端回归测试。
+需要 macOS 13+、Apple Command Line Tools、Node.js 22.13+。构建目标为当前机器架构，Apple Silicon 已实际使用；其他架构及旧系统仍需各自验收。App 当前依赖 `/opt/homebrew/bin/node` 或 `/usr/local/bin/node`，不内置 Node 运行时。
 
 ```sh
-npm install
-npm test
+git clone https://github.com/ZJUZhiyuCai/NearBridge.git
+cd NearBridge
+npm ci --ignore-scripts
 npm run check
+npm test
 npm run build:mac
 npm run install:mac
 ```
 
-构建产物 `dist/NearBridge.app`，安装到 `~/Applications/NearBridge.app`。安装脚本只替换同 bundle ID 的应用，旧版保留为同目录隐藏备份。App 是本机 ad-hoc 签名，未公证分发。
+安装到 `~/Applications/NearBridge.app`。旧 App 会保留为同目录隐藏备份，用户数据不会清除。Mac 产物使用本机 ad-hoc 签名，尚未提供公证后的通用安装包。
 
-手机端使用已安装的官方 DevEco Studio 工具链：`npm run build:phone`。本机已配置调试签名，可安装产物为 `harmony/entry/build/default/outputs/default/entry-default-signed.hap`。其他机器需要先配置自己的调试签名；未签名包不能直接安装。本机 DevEco 使用自带 SDK 26 编译，HAP 的最低及目标 API 均保持为 20。
+### HarmonyOS
 
-已接通官方 CLI：`npm run phone:login` 登录、`npm run phone:sign` 生成调试签名。2026-10-26 已完成实名认证后的登录刷新、签名和真机安装。工具安装、首次设备注册处理及私有配置说明见 [鸿蒙工程说明](harmony/README.md)。
+需要官方 DevEco Studio、支持的手机，以及自己的华为开发者账号和调试签名。详细步骤见 [鸿蒙工程说明](harmony/README.md)。
 
-开发时 `npm start` 也可启动服务。若服务原本由终端启动，App 复用它，退出 App 不会停止该外部进程。网页备用入口：<http://127.0.0.1:53318/>。
+```sh
+npm run build:phone
+```
 
-## 数据和协议
+默认查找 `/Applications/DevEco-Studio.app` 或 `~/Applications/DevEco-Studio.app`；其他位置用 `NEARBRIDGE_DEVECO_APP` 指定。构建脚本会从通用模板生成本机配置，不覆盖已有签名。安装包在 `harmony/entry/build/default/outputs/default/`，只有完成签名的 HAP 才能用于真机。
 
-- Mac 收到的文件：`~/Downloads/NearBridge/`。
-- 配对、文字、发件副本、证书、分块和队列：`~/Library/Application Support/NearBridge/`。
-- `127.0.0.1:53318`：仅 Mac 管理。
-- `*:53319`：原有网页 HTTPS，保留兼容性。
-- `*:53320`：原生手机 HTTPS，独立私有 CA + 固定公钥。
-- 原生证书随本机 IPv4 变化更新，CA 和服务公钥保持稳定。Bonjour 由 Mac App 发布。
-- 配对码 5 分钟、单次有效，Mac 明确批准；会话有效期 30 天，可解除。服务端仅保存令牌哈希。原生令牌保存在手机 App 私有沙箱内。
-- 管理操作限回环地址；请求检查 Host、Origin、Fetch Metadata。手机只能看到自己的配对记录。
-- 工作流仅运行 Mac 上选择并启用的 UUID；不接受手机传来的 shell、脚本或命令参数。最长等待 90 秒；中断不能保证撤销快捷指令已产生的效果。
-- 续传分块 4 MB；临时传输保留至完成、取消，或超过 7 天后在服务启动时清理。撤销配对会清理该手机未完成的上传。
+仓库不包含签名材料、设备授权、配对凭据、运行时日志、收发文件、私人截图或安装包。克隆后需要自行配置；开发机的历史验证记录不是你的设备已经通过验证。
 
-调试变量：`NEARBRIDGE_DATA_DIR`、`NEARBRIDGE_INBOX`、`NEARBRIDGE_PORT`、`NEARBRIDGE_PHONE_PORT`、`NEARBRIDGE_NATIVE_PORT`。临时测试使用独立目录和假的 Mac 操作适配器。
+### 开发与检查
 
-[对标与后续](docs/ROADMAP.md) · [实现说明](docs/DESIGN.md) · [验证证据](docs/VERIFICATION.md)
+```sh
+npm start                 # 开发服务；不要与已运行的 Mac App 服务重复启动
+npm run check             # 语法、版本、仓库文件和文档链接
+npm test                  # HTTP/TLS、客户端业务、Swift BLE 协议回归
+npm run benchmark         # 隔离的本机变更通知基准
+npm run benchmark -- --poll # 对照旧的 2/3 秒轮询策略
+```
+
+CI 在 Linux 上覆盖 Node 22/24/26，在 macOS 上运行测试、编译原生 App 并核对签名。鸿蒙编译与签名使用本机官方 SDK，真机检查独立记录。见 [测试矩阵](docs/TESTING.md) 和 [对抗性审查](docs/ADVERSARIAL-REVIEW.md)。
+
+## 数据与边界
+
+| 项目 | 位置 / 限制 |
+| --- | --- |
+| Mac 收件文件 | `~/Downloads/NearBridge/` |
+| 配对、证书、历史、发件副本、队列 | `~/Library/Application Support/NearBridge/` |
+| Mac 管理服务 | `127.0.0.1:53318`，仅回环地址 |
+| 原生手机服务 | HTTPS `53320`；私有 CA、公钥固定和会话认证 |
+| 网页备用服务 | HTTPS `53319` |
+| 文件与存储 | 单文件 512 MiB；总文件暂存/保留配额 2 GiB |
+| 记录 | 最多 1000 条，状态展示最新 200 条 |
+| 传输分块 | 局域网至多 4 MiB，BLE 使用 64 KiB |
+
+配对二维码五分钟、单次有效；手机会话三十天，可在 Mac 撤销。工作流只接受 Mac 已启用的 ID，不接受手机发来的命令或脚本。服务依赖本机账户及文件权限，不提供应用层磁盘加密。完整约束见 [协议说明](docs/PROTOCOL.md) 和 [安全边界](SECURITY.md)。
+
+可用环境变量：`NEARBRIDGE_DATA_DIR`、`NEARBRIDGE_INBOX`、`NEARBRIDGE_PORT`、`NEARBRIDGE_PHONE_PORT`、`NEARBRIDGE_NATIVE_PORT`。测试均使用临时目录与假的系统操作适配器。
+
+## 参与项目
+
+请先读 [贡献指南](CONTRIBUTING.md)。问题反馈请提供版本、系统、连接方式和最小复现；漏洞按 [安全策略](SECURITY.md) 私下报告。当前优先事项是新版真机回归、蓝牙长时间稳定性、网络切换和传输故障恢复，见 [路线图](docs/ROADMAP.md)。
+
+源码采用 [MIT 许可证](LICENSE)。第三方依赖仍遵循各自许可证；华为 SDK 和个人签名材料不属于本仓库的发行内容。
