@@ -1361,3 +1361,47 @@ test("Bluetooth-style byte relay retains TLS identity and never grants loopback 
   assert.equal(await request("/api/mac/clipboard/send", { session, method: "POST" }), 403);
   assert.equal(f.clipboard.writes.length, 0);
 });
+
+test("reliable text endpoints deduplicate lost replies, deleted items and clipboard side effects", async t => {
+  const { request, pair, clipboard } = await fixture(t);
+  const cookie = await pair();
+  await request("mac", "/api/settings", { method: "POST", body: { copyIncomingText: true } });
+  const body = { requestId: randomUUID(), requestedAt: Date.now(), text: "可靠发送" };
+  const first = await request("phone", "/api/actions/text", { method: "POST", body, cookie });
+  assert.equal(first.status, 201);
+  const duplicate = await request("phone", "/api/actions/text", { method: "POST", body, cookie });
+  assert.equal(duplicate.status, 200);
+  assert.equal(duplicate.json.item.id, first.json.item.id);
+  assert.deepEqual(clipboard.writes, ["可靠发送"]);
+  await request("mac", `/api/items/${first.json.item.id}`, { method: "DELETE" });
+  const deleted = await request("phone", "/api/actions/text", { method: "POST", body, cookie });
+  assert.equal(deleted.json.accepted, true);
+  assert.equal(deleted.json.item, null, "retry must not recreate a deliberately deleted item");
+  assert.equal((await request("phone", "/api/state", { cookie })).json.items.length, 0);
+  assert.equal((await request("phone", "/api/actions/text", { method: "POST", cookie, body: { ...body, text: "different" } })).status, 409);
+  assert.equal((await request("phone", "/api/actions/text", { method: "POST", cookie, body: { text: "missing identity" } })).status, 400);
+});
+
+test("reliable workflows return the same accepted job and enforce target binding on Mac retries", async t => {
+  const { request, pair, clipboard, bridge } = await fixture(t);
+  const cookie = await pair();
+  const body = { requestId: randomUUID(), requestedAt: Date.now() };
+  const path = "/api/actions/workflows/open-inbox/run";
+  const first = await request("phone", path, { method: "POST", body, cookie });
+  const second = await request("phone", path, { method: "POST", body, cookie });
+  assert.equal(first.status, 202);
+  assert.equal(second.json.job.id, first.json.job.id);
+  assert.equal(clipboard.opened.length, 1);
+  assert.equal((await request("phone", path, { method: "POST", cookie, body: { requestId: randomUUID() } })).status, 400);
+  const mac = { requestId: randomUUID(), requestedAt: Date.now(), text: "old target", peerId: bridge.store.data.device.id };
+  assert.equal((await request("mac", "/api/actions/text", { method: "POST", body: mac })).status, 201);
+  await request("mac", "/api/device/revoke", { method: "POST" });
+  // An already accepted request is still acknowledged, but an unaccepted old
+  // request must never be delivered to a newly selected phone.
+  assert.equal((await request("mac", "/api/actions/text", { method: "POST", body: mac })).status, 200);
+  assert.equal((await request("mac", "/api/actions/text", { method: "POST", body: { ...mac, requestId: randomUUID() } })).status, 409);
+  assert.equal((await request("mac", path, { method: "POST", body: { ...mac, requestId: randomUUID() } })).status, 409);
+  const state = (await request("mac", "/api/state")).json;
+  assert.equal(state.capabilities.reliableActions, 1);
+  assert.equal(state.actionReceipts, undefined, "receipt ledger is not part of the public history feed");
+});

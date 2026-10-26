@@ -22,11 +22,12 @@ The web fallback uses HTTPS 53319. Only the Mac admin interface can approve pair
 | `src/server.mjs` | HTTP routing, authentication, pairing, bounded observers, state revision and delivery |
 | `src/state-feed.mjs` | Credential-scoped revision manifests, bounded history, optional item deltas and snapshot fallback |
 | `src/store.mjs`, `src/transfers.mjs` | Index, filenames, quotas, persistent upload offsets, SHA-256 and receipts |
+| `src/actions.mjs` | Bounded, expiring operation receipts committed with text/jobs |
 | `src/workflows.mjs`, `src/system.mjs` | Enabled workflow IDs, idempotent jobs, argument-array OS calls |
 | `src/certificate.mjs` | Private CA, pinned server key, local address certificate renewal |
-| `macos/BridgeModel.swift`, `Models.swift` | Mac change subscription, queue, native API models |
+| `macos/BridgeModel.swift`, `Models.swift` | Mac change subscription, queue, durable action journal, native API models |
 | `macos/BluetoothBridge.swift`, `BluetoothProtocol.swift` | Bounded BLE framing, backpressure, forwarding TLS bytes |
-| `harmony/entry/src/main/ets/core/BridgeClient.ets` | Pinned HTTPS, change subscription, lifecycle, file storage/receipts |
+| `harmony/entry/src/main/ets/core/BridgeClient.ets` | Pinned HTTPS, change subscription, lifecycle, automatic route selection, durable action journal, file storage/receipts |
 | `harmony/entry/src/main/ets/core/BluetoothTunnel.ets` | BLE central and bounded loopback TLS tunnel |
 | `scripts/` | Builds, toolchain discovery, repository checks, isolated benchmark |
 
@@ -56,6 +57,6 @@ These operations support process-interruption recovery; full sudden-power-loss d
 
 ## Scope
 
-One Mac and one paired phone. Foreground phone operation. Explicit LAN/BLE selection. Mac remains awake. There is no cloud, Internet relay, Wi-Fi Direct/AWDL implementation, hidden background keepalive, or notification mirroring.
+One Mac and one paired phone. Foreground phone operation. Automatic selection or explicit LAN-only/BLE-only mode. Mac remains awake. There is no cloud, Internet relay, Wi-Fi Direct/AWDL implementation, hidden background keepalive, or notification mirroring.
 
 See [protocol](PROTOCOL.md), [testing](TESTING.md), [security](../SECURITY.md), and [implementation notes](DESIGN.md).

@@ -167,6 +167,7 @@ export function createBridge(options) {
       role,
       name,
       version: VERSION,
+      capabilities: { reliableActions: 1 },
       paired: Boolean(currentDevice && currentDevice.expiresAt > Date.now()),
       device: currentDevice
         ? { id: currentDevice.id, name: currentDevice.name, connected: phoneConnected() }
@@ -409,17 +410,22 @@ export function createBridge(options) {
 
     if (
       method === "POST" &&
-      pathname.startsWith("/api/workflows/") &&
+      (pathname.startsWith("/api/workflows/") || pathname.startsWith("/api/actions/workflows/")) &&
       pathname.endsWith("/run")
     ) {
       const body = await readJSON(req);
       if (role === "phone" && !deviceFor(req)) throw fail(401, "配对已解除");
-      const id = pathname.split("/")[3];
+      const reliable = pathname.startsWith("/api/actions/");
+      if (reliable && body.requestedAt === undefined) throw fail(400, "缺少操作时间");
+      if (reliable && role === "mac" && !Object.hasOwn(body, "peerId")) throw fail(400, "缺少操作目标");
+      const id = pathname.split("/")[reliable ? 4 : 3];
       const job = workflows.request(
         id,
         body.requestId,
         store.data.device?.id || null,
         role,
+        body.requestedAt,
+        reliable && role === "mac" ? body.peerId : undefined,
       );
       json(res, 202, { job });
       return;
@@ -636,12 +642,20 @@ export function createBridge(options) {
       json(res, 200, { ok: true });
       return;
     }
-    if (method === "POST" && pathname === "/api/items") {
+    if (method === "POST" && (pathname === "/api/items" || pathname === "/api/actions/text")) {
       const body = await readJSON(req);
       if (role === "phone" && !deviceFor(req)) throw fail(401, "配对已解除");
       const text = validatedText(body.text);
+      const action = pathname === "/api/items" && body.requestId === undefined && body.requestedAt === undefined ? null :
+        store.actions.prepare(body.requestId, body.requestedAt, "text", text, role, device?.id);
+      if (action?.existing) {
+        json(res, 200, { accepted: true, replayed: true, item: store.data.items.find(item => item.id === action.existing.resultId) || null });
+        return;
+      }
+      if (pathname === "/api/actions/text" && role === "mac" && body.peerId !== (store.data.device?.id || null))
+        throw fail(409, "配对的手机已改变，请先检查原操作的结果");
       hasRoom();
-      const item = store.addText(text, role, store.data.device?.id);
+      const item = store.addText(text, role, store.data.device?.id, action);
       broadcast(); // Persisted text is visible immediately, even if pbcopy is slow.
       let clipboardCopied = false;
       if (role === "phone" && store.data.settings.copyIncomingText) {

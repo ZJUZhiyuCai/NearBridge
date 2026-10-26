@@ -86,12 +86,19 @@ export class WorkflowManager {
     this.changed();
   }
 
-  request(id, requestId, peerId, role) {
+  request(id, requestId, peerId, role, requestedAt, expectedPeer) {
     if (
       typeof requestId !== "string" ||
       !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)
     )
       throw fail(400, "缺少有效请求编号");
+    const action = requestedAt === undefined ? null : this.store.actions.prepare(requestId, requestedAt, "workflow", id, role, peerId);
+    if (action?.existing) {
+      return this.store.data.jobs.find(job => job.id === action.existing.resultId) || {
+        id: action.existing.resultId, workflowId: id, status: "accepted",
+        message: "Mac 已接收这项操作，执行记录已移出历史；不会重复执行。",
+      };
+    }
     const existing = this.store.data.jobs.find(
       (job) =>
         job.requestId === requestId &&
@@ -101,8 +108,13 @@ export class WorkflowManager {
     if (existing) {
       if (existing.workflowId !== id)
         throw fail(409, "请求编号已用于另一个工作流");
+      // A client may confirm an older retained job through the new endpoint.
+      // Preserve that receipt before acknowledging the reliable contract.
+      if (action) this.store.actions.commit(action, existing.id);
       return existing;
     }
+    if (expectedPeer !== undefined && expectedPeer !== peerId)
+      throw fail(409, "配对的手机已改变，请先检查原操作的结果");
     const workflow = this.store.data.workflows.find(
       (value) => value.id === id && value.enabled,
     );
@@ -119,9 +131,10 @@ export class WorkflowManager {
       message: "正在 Mac 上执行…",
       createdAt: new Date().toISOString(),
     };
-    this.store.data.jobs.unshift(job);
-    this.store.data.jobs = this.store.data.jobs.slice(0, 100);
-    this.store.save();
+    const before = this.store.data.jobs;
+    this.store.data.jobs = [job, ...before].slice(0, 100);
+    try { this.store.actions.commit(action, job.id); }
+    catch (error) { this.store.data.jobs = before; throw error; }
     const active = { controller: new AbortController(), peerId, promise: null };
     this.active = active;
     this.changed();
@@ -138,10 +151,12 @@ export class WorkflowManager {
       })
       .finally(() => {
         job.finishedAt = new Date().toISOString();
-        this.store.save();
-        this.active = null;
-        this.changed();
+        try { this.store.save(); }
+        finally { this.active = null; this.changed(); }
       });
+    // Keep an I/O error observable to close(), without an unhandled rejection
+    // when no shutdown is currently awaiting this task.
+    active.promise.catch(() => {});
     return job;
   }
 

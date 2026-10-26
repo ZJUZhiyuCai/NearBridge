@@ -1,5 +1,36 @@
 # Performance measurements
 
+## 0.6 · Reconnect and reliable actions
+
+2026-10-26 · Mate 70 Pro+ / HarmonyOS 6, Apple Silicon Mac. One retained device-log sample records:
+
+| Stage | Phone log time |
+| --- | --- |
+| Start direct connection to remembered Mac | 18:41:19.454 |
+| GATT connected | 18:41:19.756 |
+| GATT services found | 18:41:20.690 |
+| MTU 517 / indications ready | 18:41:21.781 |
+| Local TLS forwarding listener ready | 18:41:21.786 |
+
+Elapsed start → listener: **2.332 seconds**, with no discovery phase. The old implementation always scanned for 3.5 seconds before connecting; the new successful remembered-peer path skips that fixed delay. This is one hardware sample, **not** a tap-to-Mac measurement, percentile or general speed guarantee. Subsequent TLS negotiation, request delivery and UI rendering are outside these endpoints. Unreachable/changed BLE addresses still require fallback discovery.
+
+A phone workflow produced a successful server job and a matching durable receipt. The 32,771-byte self-test file on Mac matches its recorded SHA-256; the owner confirmed the phone's round-trip pass. The owner also confirmed automatic mode selected Bluetooth on this network. Automatic LAN selection/recovery, larger files and sustained throughput remain unmeasured.
+
+Reliable text/workflow acceptance now fsyncs the receipt with its result before acknowledging. An isolated loopback benchmark with 50 × 1 KiB synthetic history, six samples per observer, measures that durability cost:
+
+| Mutation request → observed snapshot | Legacy endpoint p50 / p95 | Reliable endpoint p50 / p95 |
+| --- | ---: | ---: |
+| Mac HTTP observer | 1.49 / 2.03 ms | 6.27 / 12.22 ms |
+| Phone-protocol HTTPS observer | 2.04 / 3.71 ms | 6.59 / 7.74 ms |
+
+This adds roughly 5 ms in this fixture; it is a reliability tradeoff, not a latency improvement. Both columns use the same 0.6 service and synthetic fixture, in separate runs. No phone radio or UI is involved; full-ledger performance is not established by twelve new operations. [Legacy samples](performance/legacy-0.6.json), [reliable samples](performance/actions-0.6.json).
+
+```sh
+npm run benchmark
+npm run benchmark -- --reliable
+```
+
+
 ## 0.5 · Active synchronization
 
 2026-10-26 · Node 26.12.1 · Apple Silicon macOS · verified HTTPS on loopback. The fixture contains 200 synthetic text items of 8 KiB each; both response modes observe the same mutation. Six samples per scenario, alternating which mode requests first to distribute snapshot-cache cost.

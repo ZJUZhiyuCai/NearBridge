@@ -1,4 +1,24 @@
-# Adversarial review · 0.5
+# Adversarial review · 0.6
+
+## Third pass · 2026-10-26
+
+This is an internal review of reconnection, ambiguous side effects and automatic transport selection. The added tests use actual source with deterministic adapters plus real HTTP/TLS. They establish the listed cases; they are not independent certification or full radio fault coverage.
+
+| Finding / counterexample | Change and evidence |
+| --- | --- |
+| Every reconnect paid a fixed 3.5-second scan | Try the remembered peer directly, scan on failure, stop early on a matching report; controlled-radio tests and one hardware log with no scan (2.332 s to local listener) |
+| Cancelled connect/write callbacks could clear or break the next connection | Generation and GATT-instance guards, cancellable stage waits, ownership checks for shared promises and writer cleanup; tests stop hanging connect/services/listener and deliver late write failures |
+| Link errors blocked forever or could provoke repeated radio work | 2/4-second cooldowns, pause after three failed rounds, explicit reset; deterministic radio-call counts verify the circuit stops touching the radio |
+| Lost text/workflow replies invited duplicate operations | Native durable journals and a separate server receipt ledger; restart, deleted text, pruned jobs, full ledger, expiry, timestamp/content mismatch and legacy-job receipt upgrade are exercised |
+| Disk failure could acknowledge an operation only in memory | Commit result and receipt together, fsync before replacement, roll back memory on failure; injected write errors prove no workflow starts and retries remain possible |
+| An older server could ignore new idempotency fields | New reliable endpoints plus advertised capability; old servers cannot silently accept the new request shape |
+| A retry after re-pairing could target another device | Phone pairing-scope binding, Mac target binding, no startup replay; mismatched scopes/content reject before submission |
+| Automatic fallback could replay a mutation or change file routes between chunks | Anonymous pinned LAN probes, one shared route decision, no route change while requests/actions/transfers are active; pure BLE never probes LAN; late probes cannot override a manual choice |
+| Moving the old Mac app made its Bluetooth permission entry follow the backup | Reproduced in System Settings after the final install. Copy the backup, retain the installed app directory, verify signatures and roll back failed replacements; filesystem-identity/failure tests and a real signed-bundle replacement smoke test pass. Ad-hoc updates can still require OS reauthorization |
+| A corrupt/partially written local journal could mint a new ID | Atomic journal replacement, full UTF-8 writes with zero-write detection, fail-closed load and explicit inspect/end-retry controls |
+
+Local suite: 83 passing tests. Mac and HarmonyOS builds/signatures pass. Real-device scope: updated pairing/history retained, direct BLE reconnect, one independently verified phone workflow with receipt, Mac self-test file hash, and user confirmation of round-trip pass and automatic BLE fallback. Automatic LAN and full fault injection remain unverified on hardware. [Measurements](PERFORMANCE.md) explicitly record the small fsync cost instead of claiming every operation became faster.
+
 
 ## Second pass · 2026-10-26
 
@@ -50,12 +70,12 @@ Before fixes, the first four targeted tests (filename, missing changes contract,
 - Server restarts use new epochs; clients do not compare sequence numbers across different epochs.
 - Automatic file reception runs independently of the notification loop, and old operations are invalidated on background/transport changes.
 
-## Remaining limitations (current 0.5)
+## Remaining limitations (current 0.6)
 
-- No 0.5 phone hardware test was performed while the phone was away. Real BLE throughput, radio contention, long-running stability and the complete interruption matrix remain open.
+- Basic 0.5/0.6 phone tests were completed after the phone returned. Real BLE throughput, radio contention, long-running stability, automatic LAN behavior and the complete interruption matrix remain open.
 - A hostile BLE peer may occupy the physical link before TLS authentication. Application authorization prevents data/workflow access, but does not guarantee radio availability.
 - A trusted local process can access the loopback admin API and the user's local files. NearBridge is not a security boundary against code already running as that user.
-- Text sends have no durable idempotency key. A lost response can leave an ambiguous send; inspect the feed before retrying. Workflow IDs support idempotency on the server, but a new explicit request ID is a new action.
+- Reliable native operations require the 0.6 server and preserved original ID/timestamp. Receipts last seven days, with at most 4096 live entries; expiry rejects the old operation. Deleting the local pending journal or explicitly ending retries allows a new operation. Legacy web text and old clients retain their older semantics.
 - Initial/unknown/evicted baselines still require a full bounded snapshot. Changed items carry the full item, including its text, and the phone still serializes the reconstructed state for UI storage. Further CPU/rendering and real BLE optimization need device measurements.
 - Upload data I/O is asynchronous, but index/transfer-metadata writes and some other local operations remain synchronous. Controlled slow-disk tests establish scheduling/commit behavior, not performance on every physical disk.
 - Download cancellation cannot recall bytes already sent or queued in the network. Expiry detection has up to a one-second interval.

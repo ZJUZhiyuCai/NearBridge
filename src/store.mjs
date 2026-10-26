@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { ActionLedger } from "./actions.mjs";
 
 export function safeFilename(value) {
   const name = String(value)
@@ -42,6 +43,7 @@ export class Store {
         };
     if (this.data.version !== 1 || !Array.isArray(this.data.items))
       throw new Error("不支持的收件箱索引，请保留数据并检查版本。");
+    this.actions = new ActionLedger(this);
   }
 
   clearStaging() {
@@ -52,9 +54,13 @@ export class Store {
         fs.unlinkSync(path.join(this.staging, file));
   }
 
-  save() {
+  save(durable = false) {
     const tmp = `${this.indexPath}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), { mode: 0o600 });
+    if (durable) {
+      const fd = fs.openSync(tmp, "r+");
+      try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    }
     fs.renameSync(tmp, this.indexPath);
   }
 
@@ -62,7 +68,7 @@ export class Store {
     return this.data.items.reduce((sum, item) => sum + (item.size || 0), 0);
   }
 
-  addText(text, source, peerId = null) {
+  addText(text, source, peerId = null, action = null) {
     const item = {
       id: randomUUID(),
       kind: "text",
@@ -71,8 +77,10 @@ export class Store {
       peerId,
       createdAt: new Date().toISOString(),
     };
-    this.data.items.unshift(item);
-    this.save();
+    const before = this.data.items;
+    this.data.items = [item, ...before];
+    try { this.actions.commit(action, item.id); }
+    catch (error) { this.data.items = before; throw error; }
     return item;
   }
 

@@ -8,6 +8,7 @@ struct BridgeView: View {
     @State private var filter = "all"
     @State private var search = ""
     @State private var revoke = false
+    @State private var discardAction = false
     @State private var webPairingRequested = false
     @State private var addedShortcuts: Set<String> = []
     @State private var addingShortcuts: Set<String> = []
@@ -19,6 +20,15 @@ struct BridgeView: View {
             Divider()
             VStack(spacing: 0) {
                 if let pending = model.state?.pending { pairingBanner(pending) }
+                if (model.pendingAction != nil || model.actionStorageError), !model.actionSending {
+                    HStack(spacing: 12) {
+                        Text(model.actionStorageError ? "无法读取待确认操作" : model.pendingAction!.label).font(.system(size: 13))
+                        Spacer()
+                        Button("重试确认") { model.retryPendingAction() }.disabled(model.actionStorageError)
+                        Button("结束重试") { discardAction = true }
+                    }
+                    .padding(14).background(NB.blue.opacity(0.08))
+                }
                 Group {
                     switch currentTab {
                     case "workflow": workflowPane
@@ -43,6 +53,9 @@ struct BridgeView: View {
         .alert("操作未完成", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("知道了", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        .confirmationDialog("结束重试不会撤销已经执行的操作。请先检查结果；再次点按将发起新操作。", isPresented: $discardAction, titleVisibility: .visible) {
+            Button("已检查，结束重试", role: .destructive) { model.discardPendingAction() }
+        }
         .sheet(isPresented: $model.showingShortcuts) { shortcutsSheet }
         .sheet(isPresented: $model.showingNativePairing) { nativePairingSheet }
         .task(id: model.notice) {
@@ -520,7 +533,7 @@ struct BridgeView: View {
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.primary.opacity(0.14)))
                 .onSubmit { if canSend { model.sendText() } }
 
-            Button { model.action("/api/mac/clipboard/send", success: "剪贴板文字已加入手机收件箱") } label: {
+            Button { model.sendClipboard() } label: {
                 Label("剪贴板", systemImage: "doc.on.clipboard")
                     .font(.system(size: 12, weight: .medium))
                     .padding(.horizontal, 11)
@@ -695,7 +708,7 @@ struct BridgeView: View {
                     } header: {
                         Text("蓝牙直连")
                     } footer: {
-                        Text("开启后，在手机 NearBridge 的“连接与设置”里选择蓝牙和这台 Mac。无需同一个 Wi‑Fi，适合文字、快捷指令和小文件；大文件建议用局域网。手机选了蓝牙就只走蓝牙，不会自动切换。")
+                        Text("在手机的“连接与设置”里选择这台蓝牙 Mac。自动模式优先使用局域网，连不上时尝试蓝牙；选择“仅蓝牙”后所有内容只走蓝牙。蓝牙适合文字、快捷指令和小文件。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Section {
@@ -1076,7 +1089,7 @@ private struct NBWorkflowTile: View {
         let tone = NB.tone(for: flow.id)
         VStack(alignment: .leading, spacing: 9) {
             Button {
-                model.action("/api/workflows/\(flow.id)/run", body: ["requestId": UUID().uuidString.lowercased()])
+                model.runWorkflow(flow.id)
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .top) {
@@ -1102,7 +1115,7 @@ private struct NBWorkflowTile: View {
                 .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(!flow.enabled)
+            .disabled(!flow.enabled || model.actionSending)
             .saturation(flow.enabled ? 1 : 0.05)
             .opacity(flow.enabled ? 1 : 0.6)
             .onHover { hover = $0 }

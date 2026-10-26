@@ -5,7 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 export interface BluetoothPeer { id: string; name: string; }
-export interface BluetoothSettings { enabled: boolean; id: string; name: string; transport?: string; }
+export interface BluetoothSettings { enabled: boolean; id: string; name: string; transport?: string; mode?: string; }
 class OutgoingFrame {
   bytes: ArrayBuffer;
   done: () => void;
@@ -44,14 +44,33 @@ export class BluetoothTunnel {
   private queueBytes: number = 0;
   private writing: boolean = false;
   private retryAfter: number = 0;
+  private failures: number = 0;
+  private readyAt: number = 0;
+  private cancellations: Set<() => void> = new Set();
+  private cancelScan?: () => void;
+  connectedDeviceId: string = '';
 
-  retry(): void { this.retryAfter = 0; }
-  private async deadline<T>(operation: Promise<T>, stage: string): Promise<T> {
+  retry(): void { this.retryAfter = 0; this.failures = 0; }
+  private check(generation: number): void {
+    if (generation !== this.generation) throw new Error('连接已取消');
+  }
+  private async deadline<T>(operation: Promise<T>, stage: string, generation: number, timeout: number = 12000): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`${stage}超时，请重试蓝牙连接`)), 12000);
-      operation.then((value: T) => { clearTimeout(timer); resolve(value); })
-        .catch((error: Error) => { clearTimeout(timer); reject(error); });
+      const cancel = (): void => { clearTimeout(timer); this.cancellations.delete(cancel); reject(new Error('连接已取消')); };
+      const timer = setTimeout(() => { this.cancellations.delete(cancel); reject(new Error(`${stage}超时，请重试蓝牙连接`)); }, timeout);
+      this.cancellations.add(cancel);
+      operation.then((value: T) => {
+        clearTimeout(timer); this.cancellations.delete(cancel);
+        if (generation !== this.generation) reject(new Error('连接已取消')); else resolve(value);
+      }).catch((error: Error) => { clearTimeout(timer); this.cancellations.delete(cancel); reject(error); });
     });
+  }
+  private failed(): void {
+    if (this.readyAt && Date.now() - this.readyAt >= 30000) this.failures = 0;
+    this.failures++;
+    this.stop();
+    this.retryAfter = this.failures >= 3 ? Number.MAX_SAFE_INTEGER : Date.now() + 2000 * Math.pow(2, this.failures - 1);
+    if (this.failures >= 3) BluetoothTunnel.lastError += '；连续连接失败，请点“重新连接蓝牙”';
   }
 
   static async nearbyDevices(context: common.UIAbilityContext): Promise<BluetoothPeer[]> {
@@ -59,83 +78,116 @@ export class BluetoothTunnel {
     if (result.authResults[0] !== 0) throw new Error('需要允许蓝牙权限才能连接 Mac');
     return BluetoothTunnel.scan();
   }
-  private static async scan(): Promise<BluetoothPeer[]> {
+  private static async scan(preferredId: string = '', owner?: BluetoothTunnel): Promise<BluetoothPeer[]> {
     const scanner = ble.createBleScanner();
     const peers: Map<string, BluetoothPeer> = new Map();
+    let finish: () => void = () => {};
+    const found = new Promise<void>(resolve => { finish = resolve; });
+    const timeout = setTimeout(() => finish(), 3500);
+    if (owner) owner.cancelScan = finish;
     scanner.on('BLEDeviceFind', (report: ble.ScanReport) => {
       for (const result of report.scanResult) {
         if (result.connectable) peers.set(result.deviceId, { id: result.deviceId, name: result.deviceName || 'NearBridge Mac' });
       }
+      if (preferredId && peers.has(preferredId)) finish();
     });
     try {
-      await scanner.startScan([{ serviceUuid: SERVICE_ID }], { dutyMode: ble.ScanDuty.SCAN_MODE_LOW_LATENCY, interval: 0 });
-      await new Promise<void>(resolve => setTimeout(resolve, 3500));
+      const scanning = scanner.startScan([{ serviceUuid: SERVICE_ID }], { dutyMode: ble.ScanDuty.SCAN_MODE_LOW_LATENCY, interval: 0 });
+      if (owner) await owner.deadline(scanning, '扫描蓝牙设备', owner.generation); else await scanning;
+      await found;
       BluetoothTunnel.trace(`BLE discovery completed: ${peers.size} NearBridge device(s)`);
       return Array.from(peers.values());
     } finally {
+      clearTimeout(timeout);
+      if (owner && owner.cancelScan === finish) owner.cancelScan = undefined;
       try { await scanner.stopScan(); } catch (_) {}
       scanner.off('BLEDeviceFind');
     }
   }
   async ensure(preferredId: string): Promise<void> {
-    if (this.server && this.gatt && this.rx) return;
     if (this.starting) return this.starting;
+    if (this.server && this.gatt && this.rx) return;
     if (Date.now() < this.retryAfter) throw new Error(BluetoothTunnel.lastError || '蓝牙暂未连接，请稍候');
     this.stop();
     const generation = this.generation;
-    this.starting = this.open(preferredId, generation);
-    try { await this.starting; }
+    const opening = this.open(preferredId, generation);
+    this.starting = opening;
+    try { await opening; }
     catch (error) {
       if (generation === this.generation) {
         BluetoothTunnel.failure('蓝牙连接失败', error as Error);
-        this.stop(); this.retryAfter = Number.MAX_SAFE_INTEGER;
+        this.failed();
       }
       throw error as Error;
-    } finally { this.starting = undefined; }
+    } finally { if (this.starting === opening) this.starting = undefined; }
   }
-  private async open(preferredId: string, generation: number): Promise<void> {
-    await this.closing;
-    BluetoothTunnel.lastError = '';
-    const peers = await BluetoothTunnel.scan();
-    if (generation !== this.generation) throw new Error('连接已取消');
-    let peer = peers.find((value: BluetoothPeer) => value.id === preferredId);
-    if (!peer && peers.length === 1) peer = peers[0];
-    if (!peer) throw new Error(peers.length ? '发现多台 Mac，请在设备页重新选择' : '未发现 Mac，请开启 Mac NearBridge 的蓝牙通道');
-    const gatt = ble.createGattClientDevice(peer.id, { transport: connection.BluetoothTransport.TRANSPORT_LE, autoConnect: false });
+  private disposeGatt(): void {
+    const gatt = this.gatt; this.gatt = undefined; this.rx = undefined;
+    if (gatt) {
+      try { gatt.off('BLECharacteristicChange'); gatt.off('BLEConnectionStateChange'); gatt.off('BLEMtuChange'); } catch (_) {}
+      try { gatt.disconnect(); } catch (_) {}
+      try { gatt.close(); } catch (_) {}
+    }
+  }
+  private async connect(id: string, generation: number, timeout: number): Promise<ble.GattClientDevice> {
+    this.check(generation);
+    const gatt = ble.createGattClientDevice(id, { transport: connection.BluetoothTransport.TRANSPORT_LE, autoConnect: false });
     this.gatt = gatt;
     gatt.on('BLECharacteristicChange', (characteristic: ble.BLECharacteristic) => {
-      if (generation !== this.generation || characteristic.characteristicUuid.toLowerCase() !== TRANSMIT_ID) return;
+      if (generation !== this.generation || this.gatt !== gatt || characteristic.characteristicUuid.toLowerCase() !== TRANSMIT_ID) return;
       const bytes = new Uint8Array(characteristic.characteristicValue);
       if (bytes.length < 2 || bytes[1] === 0) return;
       this.pipes.get(bytes[1])?.receive(bytes[0], characteristic.characteristicValue.slice(2));
     });
-    gatt.on('BLEMtuChange', (mtu: number) => { this.mtu = mtu; });
-    await new Promise<void>((resolve, reject) => {
+    gatt.on('BLEMtuChange', (mtu: number) => { if (generation === this.generation && this.gatt === gatt) this.mtu = mtu; });
+    await this.deadline(new Promise<void>((resolve, reject) => {
       let connected = false;
-      const timeout = setTimeout(() => reject(new Error('蓝牙连接超时')), 12000);
       gatt.on('BLEConnectionStateChange', (event: ble.BLEConnectionChangeState) => {
-        if (generation !== this.generation) return;
+        if (generation !== this.generation || this.gatt !== gatt) return;
         BluetoothTunnel.trace(`BLE connection state: ${event.state}`);
         if (event.state === constant.ProfileConnectionState.STATE_CONNECTED) {
-          connected = true; clearTimeout(timeout); resolve();
+          connected = true; resolve();
         } else if (event.state === constant.ProfileConnectionState.STATE_DISCONNECTED) {
-          clearTimeout(timeout);
           if (!connected) reject(new Error('蓝牙连接已断开'));
           else this.breakLink(new Error('Mac 蓝牙连接已断开'));
         }
       });
-      try { gatt.connect(); } catch (error) { clearTimeout(timeout); reject(error as Error); }
-    });
+      try { gatt.connect(); } catch (error) { reject(error as Error); }
+    }), '连接蓝牙', generation, timeout);
+    this.check(generation);
+    this.connectedDeviceId = id;
+    return gatt;
+  }
+  private async open(preferredId: string, generation: number): Promise<void> {
+    await this.closing;
+    this.check(generation);
+    BluetoothTunnel.lastError = '';
+    let gatt: ble.GattClientDevice;
+    try {
+      if (!preferredId) throw new Error('尚未选择蓝牙 Mac');
+      BluetoothTunnel.trace('BLE reconnecting to remembered device');
+      gatt = await this.connect(preferredId, generation, 4500);
+    } catch (_) {
+      this.check(generation);
+      this.disposeGatt();
+      const peers = await BluetoothTunnel.scan(preferredId, this);
+      this.check(generation);
+      let peer = peers.find((value: BluetoothPeer) => value.id === preferredId);
+      if (!peer && peers.length === 1) peer = peers[0];
+      if (!peer) throw new Error(peers.length ? '发现多台 Mac，请在连接设置重新选择' : '未发现 Mac，请开启 Mac NearBridge 的蓝牙通道');
+      gatt = await this.connect(peer.id, generation, 12000);
+    }
     BluetoothTunnel.trace('BLE discovering GATT services');
-    const services = await this.deadline(gatt.getServices(), '发现蓝牙服务');
+    const services = await this.deadline(gatt.getServices(), '发现蓝牙服务', generation);
+    this.check(generation);
     const service = services.find((value: ble.GattService) => value.serviceUuid.toLowerCase() === SERVICE_ID);
     const rx = service?.characteristics.find((value: ble.BLECharacteristic) => value.characteristicUuid.toLowerCase() === RECEIVE_ID);
     const tx = service?.characteristics.find((value: ble.BLECharacteristic) => value.characteristicUuid.toLowerCase() === TRANSMIT_ID);
     if (!rx || !tx) throw new Error('Mac 蓝牙服务版本不匹配');
     BluetoothTunnel.trace('BLE GATT services found');
-    try { this.mtu = await this.deadline(gatt.setBLEMtu(517), '协商传输大小'); } catch (_) { this.mtu = 23; }
+    try { this.mtu = await this.deadline(gatt.setBLEMtu(517), '协商传输大小', generation); } catch (_) { this.check(generation); this.mtu = 23; }
     BluetoothTunnel.trace(`BLE subscribing, MTU=${this.mtu}`);
-    await this.deadline(gatt.setCharacteristicChangeIndication(tx, true), '开启蓝牙接收');
+    await this.deadline(gatt.setCharacteristicChangeIndication(tx, true), '开启蓝牙接收', generation);
     if (generation !== this.generation) throw new Error('连接已取消');
     this.rx = rx;
     BluetoothTunnel.trace(`BLE GATT ready, MTU=${this.mtu}`);
@@ -144,20 +196,22 @@ export class BluetoothTunnel {
       if (generation !== this.generation || this.pipes.size >= 4) { client.close().catch(() => {}); return; }
       do { this.nextId = this.nextId % 255 + 1; } while (this.pipes.has(this.nextId));
       const id = this.nextId;
-      const pipe = new BluetoothPipe(client, (type: number, data: ArrayBuffer): Promise<void> => this.send(type, id, data),
-        () => { this.pipes.delete(id); });
+      const pipe = new BluetoothPipe(client, async (type: number, data: ArrayBuffer): Promise<void> => { this.check(generation); await this.send(type, id, data); },
+        () => { if (generation === this.generation) this.pipes.delete(id); });
       this.pipes.set(id, pipe); pipe.start();
     });
-    await server.listen({ address: '127.0.0.1', port: 53320, family: 1 });
-    if (generation !== this.generation) { await server.close(); throw new Error('连接已取消'); }
     this.server = server;
+    await this.deadline(server.listen({ address: '127.0.0.1', port: 53320, family: 1 }), '启动蓝牙通道', generation);
+    this.check(generation); this.readyAt = Date.now();
     BluetoothTunnel.trace('BLE loopback TLS listener ready');
   }
   private async send(type: number, id: number, data: ArrayBuffer): Promise<void> {
     if (!this.gatt || !this.rx) throw new Error('蓝牙已断开');
+    const generation = this.generation;
     const size = Math.max(1, Math.min(512, this.mtu - 3) - 2);
     const bytes = new Uint8Array(data);
     for (let offset = 0; offset < Math.max(1, bytes.length); offset += size) {
+      this.check(generation);
       const count = Math.min(size, bytes.length - offset);
       const packet = new ArrayBuffer(2 + count);
       const frame = new Uint8Array(packet); frame[0] = type; frame[1] = id;
@@ -179,31 +233,30 @@ export class BluetoothTunnel {
         const frame = this.queue[0];
         this.rx.characteristicValue = frame.bytes;
         try {
-          await this.gatt.writeCharacteristicValue(this.rx, ble.GattWriteType.WRITE);
+          await this.deadline(this.gatt.writeCharacteristicValue(this.rx, ble.GattWriteType.WRITE), '蓝牙写入', generation);
           if (generation !== this.generation) return;
           this.queue.shift(); this.queueBytes -= frame.bytes.byteLength; frame.done();
-        } catch (error) { this.breakLink(error as Error); return; }
+        } catch (error) { if (generation === this.generation) this.breakLink(error as Error); return; }
       }
-    } finally { this.writing = false; }
+    } finally { if (generation === this.generation) this.writing = false; }
   }
   private breakLink(error: Error): void {
     BluetoothTunnel.failure('蓝牙传输中断', error);
-    this.stop(); this.retryAfter = Number.MAX_SAFE_INTEGER;
+    this.failed();
   }
   stop(): void {
     this.generation++;
+    this.starting = undefined; this.writing = false; this.readyAt = 0; this.connectedDeviceId = '';
+    this.cancelScan?.(); this.cancelScan = undefined;
+    Array.from(this.cancellations).forEach((cancel: () => void) => cancel());
+    this.cancellations.clear();
     const active = Array.from(this.pipes.values()); this.pipes.clear();
     active.forEach((pipe: BluetoothPipe) => pipe.close(false));
     const queued = this.queue; this.queue = []; this.queueBytes = 0;
     queued.forEach((frame: OutgoingFrame) => frame.failed(new Error('蓝牙连接已关闭')));
     const server = this.server; this.server = undefined;
     if (server) this.closing = server.close().catch(() => {});
-    const gatt = this.gatt; this.gatt = undefined; this.rx = undefined;
-    if (gatt) {
-      try { gatt.off('BLECharacteristicChange'); gatt.off('BLEConnectionStateChange'); gatt.off('BLEMtuChange'); } catch (_) {}
-      try { gatt.disconnect(); } catch (_) {}
-      try { gatt.close(); } catch (_) {}
-    }
+    this.disposeGatt();
     this.mtu = 23;
   }
 }
