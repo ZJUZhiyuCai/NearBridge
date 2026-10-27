@@ -1,6 +1,6 @@
 # Protocol contracts
 
-Since 0.7, Windows is the primary desktop. Existing mac role/source values and /api/mac/* endpoints mean the trusted desktop, including Windows; they remain unchanged for stored records and older clients. BLE UUIDs, frames, CA/pin verification and receipts are unchanged. The native pairing endpoint accepts an optional ip query selecting a current local address. /api/mac/reveal-file accepts only a stored file ID and opens its parent directory; phone callers cannot use it.
+Windows and Mac both implement this protocol. Existing mac role/source values and /api/mac/* endpoints mean the trusted desktop; they remain unchanged for stored records and older clients. In 0.8, state snapshots and native pairing payloads add optional platform metadata (windows/macos/unknown), used only for display. The phone keeps a separate local profile per paired public key and selects one target at a time. BLE UUIDs, frames, CA/pin verification and receipts are unchanged. The native pairing endpoint accepts an optional ip query selecting a current local address. /api/mac/reveal-file accepts only a stored file ID and opens its parent directory; phone callers cannot use it.
 
 This documents the current local protocol, not a stable third-party API. Keep old `/api/state` clients working when adding fields.
 

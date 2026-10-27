@@ -3,34 +3,86 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f2f2f7">
-  <title>NearBridge · Windows 与鸿蒙互联</title>
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f3f3f6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1b1b1d" media="(prefers-color-scheme: dark)">
+  <title>NearBridge</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" type="module"></script>
 </head>
 <body>
+  <!-- 图标：20×20 线性图标，currentColor 着色；页面与脚本通过 <use href="#i-…"> 引用 -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-transfer" viewBox="0 0 20 20"><path d="M6.5 16V4M6.5 4 3.5 7M6.5 4l3 3M13.5 4v12M13.5 16l-3-3M13.5 16l3-3"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 20 20"><path d="M11.2 2.5 4.5 11h5l-.8 6.5L15.5 9h-5z"/></symbol>
+    <symbol id="i-devices" viewBox="0 0 20 20"><rect x="2" y="4.5" width="10.5" height="7.5" rx="1.2"/><path d="M.8 15h12.4"/><rect x="14" y="7" width="5" height="9.5" rx="1.2"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 20 20"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"/><circle cx="13" cy="6" r="2"/><circle cx="7" cy="14" r="2"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 20 20"><rect x="3.5" y="4" width="13" height="9" rx="1.5"/><path d="M1.5 16h17"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 20 20"><rect x="6" y="2" width="8" height="16" rx="2"/><path d="M9 15h2"/></symbol>
+    <symbol id="i-file" viewBox="0 0 20 20"><path d="M5 2.5h6.5l4 4V17a.5.5 0 0 1-.5.5H5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z"/><path d="M11.5 2.5v4h4"/></symbol>
+    <symbol id="i-image" viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><circle cx="7" cy="8" r="1.5"/><path d="m3 15 4.5-4.5 3 3 2-2 4.5 4.5"/></symbol>
+    <symbol id="i-text" viewBox="0 0 20 20"><path d="M4 5.5h12M4 10h12M4 14.5h7.5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 20 20"><path d="M8.3 11.7l3.4-3.4"/><path d="M9.6 5.6l1.1-1.1a3.2 3.2 0 0 1 4.5 4.5L14 10.2M10.4 14.4l-1.1 1.1a3.2 3.2 0 0 1-4.5-4.5L6 9.8"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 20 20"><path d="M2.5 5.5a1 1 0 0 1 1-1h4l1.5 2h7.5a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 20 20"><rect x="4.5" y="3.5" width="11" height="14" rx="1.5"/><path d="M7.5 2.5h5v2.2h-5zM7.5 9h5M7.5 12.5h5"/></symbol>
+    <symbol id="i-up" viewBox="0 0 20 20"><path d="M10 16V4M5 9l5-5 5 5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 20 20"><path d="M10 4v12M5 11l5 5 5-5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 20 20"><path d="m4 10.5 4 4 8-9"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 20 20"><path d="M10 3 18 17H2z"/><path d="M10 8.5v3.5M10 14.6v.01"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 20 20"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><path d="M16 3.5V7h-3.5"/></symbol>
+    <symbol id="i-bluetooth" viewBox="0 0 20 20"><path d="m6 6.5 8 7-4 3.5V3l4 3.5-8 7"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 20 20"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></symbol>
+    <symbol id="i-play" viewBox="0 0 20 20"><path d="M7 4.8v10.4l8.2-5.2z" fill="currentColor"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 20 20"><rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 20 20"><rect x="3" y="3" width="5" height="5" rx=".6"/><rect x="12" y="3" width="5" height="5" rx=".6"/><rect x="3" y="12" width="5" height="5" rx=".6"/><path d="M12 12h2v2M17 12v.01M12 17h.01M15 15h2v2"/></symbol>
+    <symbol id="i-open" viewBox="0 0 20 20"><path d="M11 3.5h5.5V9M16.5 3.5 9 11"/><path d="M14 12v3.5a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1H8"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 20 20"><path d="M3 7a1 1 0 0 1 1-1h2.5l1.5-2h4l1.5 2H16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><circle cx="10" cy="10.5" r="3"/></symbol>
+    <symbol id="i-music" viewBox="0 0 20 20"><path d="M8 15V4.5l8-1.5V13"/><circle cx="6" cy="15" r="2"/><circle cx="14" cy="13" r="2"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 20 20"><path d="M16 12.5A6.5 6.5 0 0 1 7.5 4a6.5 6.5 0 1 0 8.5 8.5z"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 20 20"><path d="M5 2.5h10a.5.5 0 0 1 .5.5v14a.5.5 0 0 1-.5.5H5a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5zM7.5 7h5M7.5 10h5M7.5 13h3"/></symbol>
+    <symbol id="i-download" viewBox="0 0 20 20"><path d="M10 3v9M6 8.5l4 4 4-4M3.5 13.5V16a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-2.5"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3.2"/><path d="M10 2v1.5M10 16.5V18M2 10h1.5M16.5 10H18M4.3 4.3l1.1 1.1M14.6 14.6l1.1 1.1M4.3 15.7l1.1-1.1M14.6 5.4l1.1-1.1"/></symbol>
+  </svg>
+
   <aside class="sidebar">
-    <a class="brand" href="/" aria-label="NearBridge 首页"><img src="/icon.svg" alt="" width="34" height="34"><span>NearBridge<small>WINDOWS × HARMONYOS</small></span></a>
-    <div class="nav-label">工作台</div>
+    <a class="brand" href="/" aria-label="NearBridge 首页"><img src="/icon.svg" alt="" width="30" height="30"><span>NearBridge<small id="brand-platform">本地互联</small></span></a>
+    <button type="button" id="nav-device" class="nav-device mac-only" aria-label="手机连接状态">
+      <span class="nav-device-glyph"><svg class="icon"><use href="#i-phone"/></svg><i class="dot" id="nav-device-dot"></i></span>
+      <span class="nav-device-text"><strong id="nav-device-name">连接手机</strong><small id="nav-device-state">尚未配对</small></span>
+    </button>
     <nav aria-label="主导航">
-      <button class="nav-item active" data-nav="transfer"><span class="nav-icon">↔</span>收发</button>
-      <button class="nav-item" data-nav="workflows"><span class="nav-icon">▷</span>工作流</button>
-      <button class="nav-item" data-nav="pairing"><span class="nav-icon">⌘</span>设备连接</button>
-      <button class="nav-item" data-nav="settings"><span class="nav-icon">⚙</span>偏好设置</button>
+      <button type="button" class="nav-item active" data-nav="transfer" aria-current="page"><svg class="icon nav-icon"><use href="#i-transfer"/></svg><span>互传</span></button>
+      <button type="button" class="nav-item" data-nav="workflows"><svg class="icon nav-icon"><use href="#i-bolt"/></svg><span>快捷指令</span></button>
+      <button type="button" class="nav-item" data-nav="pairing"><svg class="icon nav-icon"><use href="#i-devices"/></svg><span>手机连接</span></button>
+      <button type="button" class="nav-item" data-nav="settings"><svg class="icon nav-icon"><use href="#i-sliders"/></svg><span>设置</span></button>
     </nav>
-    <div class="sidebar-bottom"><span class="local-mark">●</span> 只在你的设备之间<small>本地运行 · v0.1.0</small></div>
+    <div class="sidebar-bottom">
+      <span class="sidebar-fact"><svg class="icon"><use href="#i-lock"/></svg>加密直连 · 只在你的设备之间</span>
+      <span class="sidebar-fact native-only"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>空格</kbd> 唤出窗口</span>
+      <small id="app-version">本地运行</small>
+    </div>
   </aside>
+
   <div class="workspace">
     <header class="topbar">
-      <div class="mobile-brand"><img src="/icon.svg" alt="" width="28" height="28"><strong>NearBridge</strong></div>
-      <div class="breadcrumb"><span>个人设备</span><span>/</span><strong id="page-label">收发</strong></div>
+      <div class="mobile-brand"><img src="/icon.svg" alt="" width="26" height="26"><strong>NearBridge</strong></div>
+      <div class="breadcrumb"><span id="crumb-root">NearBridge</span><svg class="icon crumb-sep" aria-hidden="true"><use href="#i-chevron"/></svg><strong id="page-label">互传</strong></div>
       <div class="connection" id="connection" role="status"><i></i><span>正在连接</span></div>
     </header>
-    <nav id="mobile-workspace-nav" class="mobile-workspace-nav phone-only" aria-label="手机工作台" hidden><button data-nav="transfer">收发内容</button><button data-nav="workflows">遥控电脑</button></nav>
+    <nav id="mobile-workspace-nav" class="mobile-workspace-nav phone-only" aria-label="手机工作台" hidden><button type="button" data-nav="transfer">收发内容</button><button type="button" data-nav="workflows">遥控电脑</button></nav>
+
+    <!-- Windows 宿主的待发队列与回执；替代原生工具条上的“重试 / 结束重试” -->
+    <div id="host-status" class="host-status native-only" role="status" hidden>
+      <svg class="icon host-status-icon" aria-hidden="true"><use href="#i-retry"/></svg>
+      <div class="host-status-text"><strong id="host-status-text"></strong><span id="host-status-detail"></span></div>
+      <div class="host-status-actions"><button type="button" id="host-forget" class="quiet" hidden>结束重试</button><button type="button" id="host-retry" class="primary">重试</button></div>
+    </div>
 
     <main id="main" class="main-content">
-      <section id="loading" class="loading">正在打开你的工作台…</section>
+      <section id="loading" class="loading"><span class="spinner" aria-hidden="true"></span>正在打开你的工作台…</section>
       <section id="pair-phone" class="phone-pair" hidden>
         <div class="eyebrow">首次连接</div><h1>连接这台电脑</h1>
         <p id="pair-intro">扫码建立配对，之后可以直接打开此页面。</p>
@@ -40,53 +92,81 @@
           <button class="primary" id="pair-submit" type="submit">请求连接</button>
         </form>
         <div id="pair-status" role="status" class="notice" hidden></div>
-        <p class="muted compact">配对后，这台手机可以收发文件与文字、触发电脑已启用的工作流；电脑上可随时解除连接权限。</p>
+        <p class="muted compact">配对后，这台手机可以收发文件与文字、触发电脑已启用的快捷指令；电脑上可随时解除连接权限。</p>
       </section>
 
       <section id="transfer-view" hidden>
-        <div class="title-row"><div><div class="eyebrow" id="recipient-kicker">WINDOWS → 手机</div><h1 id="send-title">发送到手机</h1><p class="subtitle" id="recipient">先连接你的华为手机</p></div><button id="inbox-button" class="quiet mac-only">打开收件目录 <span>↗</span></button></div>
+        <div class="title-row">
+          <div>
+            <div class="eyebrow" id="recipient-kicker">这台电脑 → 手机</div>
+            <h1 id="send-title">发送到手机</h1>
+            <p class="subtitle" id="recipient">先连接你的手机</p>
+          </div>
+          <button type="button" id="inbox-button" class="quiet mac-only"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>收件目录</button>
+        </div>
         <div class="transfer-layout">
           <div class="primary-workspace">
-            <div class="send-tabs" role="tablist" aria-label="发送类型">
-              <button role="tab" aria-selected="true" aria-controls="file-panel" id="file-tab" class="selected">文件与照片</button>
-              <button role="tab" aria-selected="false" aria-controls="text-panel" id="text-tab">文字与链接</button>
-            </div>
-            <div id="file-panel" role="tabpanel" aria-labelledby="file-tab">
-              <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="选择或拖入文件">
-                <svg class="transfer-art" viewBox="0 0 140 94" aria-hidden="true"><rect x="8" y="14" width="72" height="52" rx="7"/><path d="M1 76h86M30 76l3-10m23 10-3-10"/><rect x="98" y="3" width="35" height="72" rx="7"/><path d="M109 11h13M110 67h10"/><path class="accent-stroke" d="M62 38h45m-9-8 9 8-9 8M93 55H49m9-8-9 8 9 8"/></svg>
-                <strong>把文件放到这里</strong><span>照片、视频、文档，保持原文件</span>
-                <span class="choose-label">选择文件 <span>＋</span></span>
-                <small id="file-limit">单个文件最高 512 MB</small>
+            <div class="send-card">
+              <div class="send-tabs" role="tablist" aria-label="发送类型">
+                <button type="button" role="tab" aria-selected="true" aria-controls="file-panel" id="file-tab" class="selected"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>文件与照片</button>
+                <button type="button" role="tab" aria-selected="false" aria-controls="text-panel" id="text-tab" tabindex="-1"><svg class="icon" aria-hidden="true"><use href="#i-text"/></svg>文字与链接</button>
               </div>
-              <input type="file" id="file-input" multiple hidden>
-              <div id="upload-status" class="upload-status" hidden aria-live="polite"><div><strong id="upload-name"></strong><span id="upload-percent"></span></div><progress id="upload-progress" max="100" value="0"></progress><small id="upload-detail"></small></div>
+              <div id="file-panel" role="tabpanel" aria-labelledby="file-tab">
+                <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="选择或拖入文件" aria-describedby="file-limit">
+                  <svg class="transfer-art" viewBox="0 0 140 94" aria-hidden="true"><rect x="8" y="14" width="72" height="52" rx="7"/><path d="M1 76h86M30 76l3-10m23 10-3-10"/><rect x="98" y="3" width="35" height="72" rx="7"/><path d="M109 11h13M110 67h10"/><path class="accent-stroke" d="M62 38h45m-9-8 9 8-9 8M93 55H49m9-8-9 8 9 8"/></svg>
+                  <strong>把文件拖到这里</strong><span>照片、视频、文档都可以，保持原文件</span>
+                  <span class="choose-label"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>选择文件</span>
+                  <small id="file-limit">单个文件最高 512 MB</small>
+                </div>
+                <div class="file-actions native-only">
+                  <button type="button" id="choose-folder" class="quiet"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>发送文件夹…</button>
+                  <span class="muted compact">文件夹会打包为 ZIP 再发送 · <kbd>Ctrl</kbd>+<kbd>O</kbd> 选择文件</span>
+                </div>
+                <input type="file" id="file-input" multiple hidden>
+                <div id="upload-status" class="upload-status" hidden aria-live="polite">
+                  <svg class="icon upload-icon" aria-hidden="true"><use href="#i-up"/></svg>
+                  <div class="upload-body"><div><strong id="upload-name"></strong><span id="upload-percent"></span></div><progress id="upload-progress" max="100" value="0"></progress><small id="upload-detail"></small></div>
+                </div>
+              </div>
+              <form id="text-panel" role="tabpanel" aria-labelledby="text-tab" hidden>
+                <label class="sr-only" for="message">要发送的文字或链接</label>
+                <textarea id="message" placeholder="粘贴一段文字，或者放下一个链接。" rows="7" maxlength="65536" aria-describedby="compose-hint"></textarea>
+                <div class="compose-footer">
+                  <button type="button" id="clipboard-send" class="quiet mac-only"><svg class="icon" aria-hidden="true"><use href="#i-clipboard"/></svg>发送电脑剪贴板</button>
+                  <span class="phone-only muted compact">可长按输入框粘贴</span>
+                  <span id="compose-hint" class="compose-hint mac-only"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> 发送</span>
+                  <button type="submit" class="primary" id="text-send">发送<svg class="icon" aria-hidden="true"><use href="#i-up"/></svg></button>
+                </div>
+              </form>
             </div>
-            <form id="text-panel" role="tabpanel" aria-labelledby="text-tab" hidden>
-              <label class="sr-only" for="message">要发送的文字或链接</label>
-              <textarea id="message" placeholder="粘贴一段文字，或者放下一个链接。" rows="7" maxlength="65536"></textarea>
-              <div class="compose-footer"><button type="button" id="clipboard-send" class="quiet mac-only">发送电脑剪贴板 ↗</button><span class="phone-only muted compact">可长按输入框粘贴</span><button type="submit" class="primary" id="text-send">发送 <span>↑</span></button></div>
-            </form>
-            <div class="history-heading"><h2>最近收发 <span id="item-count">0</span></h2><div class="history-filters" role="group" aria-label="记录筛选"><button class="selected" data-filter="all">全部</button><button data-filter="received">收到</button><button data-filter="sent">发出</button></div></div>
+            <div class="history-heading"><h2>最近收发 <span id="item-count">0</span></h2><div class="history-filters" role="group" aria-label="记录筛选"><button type="button" class="selected" data-filter="all" aria-pressed="true">全部</button><button type="button" data-filter="received" aria-pressed="false">收到</button><button type="button" data-filter="sent" aria-pressed="false">发出</button></div></div>
             <div id="history" class="history" aria-live="polite"></div>
           </div>
-          <aside class="device-inspector mac-only">
+          <aside class="device-inspector mac-only" aria-label="连接状态">
             <div class="section-caption">你的连接</div>
-            <div class="device-line"><div class="device-glyph">▰</div><div><strong id="mac-name">这台电脑</strong><small>本机 · 接收端已运行</small></div><i class="dot online"></i></div>
-            <div class="connection-line"><span></span><small>本地加密传输</small><span></span></div>
-            <div id="phone-line" class="device-line"><div class="device-glyph">▯</div><div><strong id="phone-name">等待华为手机</strong><small id="phone-state">扫码完成首次连接</small></div><i class="dot" id="phone-dot"></i></div>
-            <div id="mini-pairing"><img id="mini-qr" alt="用手机扫描此二维码连接" width="196" height="196" hidden><p id="mini-pair-caption">正在准备连接二维码</p><button class="text-button" id="pair-details">连接说明与二维码 ↗</button></div>
-            <div class="inspector-note"><strong>连接后这样用</strong><p>手机选好文件直接发送；电脑上的文字和链接，也可以随手带到手机。</p></div>
+            <div class="link-pair">
+              <div class="device-line"><div class="device-glyph"><svg class="icon"><use href="#i-laptop"/></svg></div><div><strong><span id="mac-name">这台电脑</span><span class="platform-tag" id="computer-platform">电脑</span></strong><small>本机 · 接收端已运行</small></div><i class="dot online"></i></div>
+              <div class="connection-line"><span></span><small><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><span id="link-route">本地加密传输</span></small><span></span></div>
+              <div id="phone-line" class="device-line"><div class="device-glyph"><svg class="icon"><use href="#i-phone"/></svg></div><div><strong id="phone-name">等待手机</strong><small id="phone-state">扫码完成首次连接</small></div><i class="dot" id="phone-dot"></i></div>
+            </div>
+            <div id="mini-pairing"><div class="qr-frame"><img id="mini-qr" alt="用手机扫描此二维码连接" width="196" height="196" hidden></div><div><p id="mini-pair-caption">正在准备连接二维码</p><button type="button" class="text-button" id="pair-details">连接说明与二维码<svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></button></div></div>
+            <div id="bluetooth-row" class="bluetooth-row native-only" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-bluetooth"/></svg>
+              <label for="bluetooth-toggle"><strong>允许手机用蓝牙连接</strong><small id="bluetooth-state">未开启</small></label>
+              <input type="checkbox" id="bluetooth-toggle" class="switch" role="switch" hidden>
+            </div>
+            <div class="inspector-note"><strong>连接后这样用</strong><p>把文件拖进窗口任意位置就能发到手机；手机发来的照片、文件和文字会出现在左侧记录里。</p></div>
           </aside>
         </div>
       </section>
 
       <section id="workflows-view" hidden>
-        <div class="title-row"><div><div class="eyebrow">手机点一下 · WINDOWS 来执行</div><h1>工作流</h1><p class="subtitle">把常用操作放到手机上，每次执行都有回执。</p></div><button id="workflow-connect" class="quiet mac-only">连接手机 ↗</button></div>
+        <div class="title-row"><div><div class="eyebrow">手机点一下 · 电脑来执行</div><h1>快捷指令</h1><p class="subtitle">手机上的按钮，电脑上的动作。每次执行都有回执。</p></div><button type="button" id="workflow-connect" class="quiet mac-only"><svg class="icon" aria-hidden="true"><use href="#i-phone"/></svg>连接手机</button></div>
         <div class="workflow-status"><i class="dot" id="workflow-dot"></i><span id="workflow-connection">正在连接电脑</span></div>
         <div id="workflow-list" class="workflow-list"></div>
         <div class="shortcut-builder mac-only">
-          <div class="builder-heading"><div><h2>接入你的电脑快捷指令</h2><p>先在电脑选定，手机才会出现这个按钮。输入参数暂不支持。</p></div><button class="quiet" id="load-shortcuts">载入本机快捷指令</button></div>
-          <div id="shortcut-picker" hidden><label for="shortcut-select">选择一个你了解作用的快捷指令</label><div class="shortcut-input"><select id="shortcut-select"></select><button id="add-shortcut" class="primary">加入手机面板</button></div><p class="compact muted" id="shortcut-hint"></p></div>
+          <div class="builder-heading"><div><h2 id="builder-title">接入你的电脑快捷指令</h2><p id="builder-description">先在电脑选定，手机才会出现这个按钮。输入参数暂不支持。</p></div><div class="builder-actions"><button type="button" class="quiet" id="open-workflows" hidden><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>打开快捷方式目录</button><button type="button" class="quiet" id="load-shortcuts"><svg class="icon" aria-hidden="true"><use href="#i-retry"/></svg>载入本机快捷指令</button></div></div>
+          <div id="shortcut-picker" hidden><label for="shortcut-select">选择一个你了解作用的快捷指令</label><div class="shortcut-input"><select id="shortcut-select"></select><button type="button" id="add-shortcut" class="primary">加入手机面板</button></div><p class="compact muted" id="shortcut-hint"></p></div>
         </div>
         <div class="history-heading"><h2>执行记录</h2><span class="muted compact">最近 20 次</span></div>
         <div id="workflow-jobs" class="workflow-jobs"></div>
@@ -94,33 +174,44 @@
       </section>
 
       <section id="pairing-view" hidden>
-        <div class="eyebrow">设备连接</div><h1>让手机连上来</h1><p class="subtitle">手机和电脑连接同一个 Wi-Fi。</p>
+        <h1>连接手机</h1><p class="subtitle">手机和电脑连接同一个 Wi‑Fi，扫码后在这里确认。</p>
         <div id="paired-summary" class="notice" hidden></div>
-        <div class="pairing-layout"><div class="pairing-qr"><img id="large-qr" alt="连接二维码" width="280" height="280" hidden><p id="pairing-expiry"></p><button class="quiet" id="refresh-pairing">刷新二维码 ↻</button></div><div class="pairing-guide">
+        <div class="pending-pairing" id="pending-pairing" hidden><svg class="icon pending-icon" aria-hidden="true"><use href="#i-phone"/></svg><div><strong id="pending-name"></strong><p>正在请求配对，只确认你手边的手机。</p></div><div><button type="button" id="reject-pair" class="quiet">拒绝</button><button type="button" id="approve-pair" class="primary">允许配对</button></div></div>
+        <div class="pairing-layout"><div class="pairing-qr"><div class="qr-frame large"><img id="large-qr" alt="连接二维码" width="280" height="280" hidden></div><p id="pairing-expiry"></p><button type="button" class="quiet" id="refresh-pairing"><svg class="icon" aria-hidden="true"><use href="#i-retry"/></svg>刷新二维码</button></div><div class="pairing-guide">
           <ol><li><strong>用手机浏览器打开扫码链接</strong><p>二维码只用于配对，不会发送到外部服务。</p></li><li><strong>首次访问，核对本地证书</strong><p>这是电脑自己生成的 HTTPS 证书，手机可能提示证书不受信任。核对下方地址与证书指纹；仅确认这台电脑的连接。若浏览器不允许继续，请保留提示，之后换原生端配对。</p></li><li><strong>发送请求，在电脑确认</strong><p>成功后可收藏手机页面，下次直接打开。</p></li></ol>
           <label for="network-select">电脑的局域网地址</label><select id="network-select"></select>
           <div class="connection-address" id="pairing-address"></div>
           <details><summary>查看证书 SHA-256 指纹</summary><code id="fingerprint"></code></details>
+          <p class="pairing-multi"><svg class="icon" aria-hidden="true"><use href="#i-devices"/></svg><span>一部手机可以同时添加多台电脑（Windows 和 Mac），在手机 NearBridge 的“我的电脑”里切换，互不替换。</span></p>
         </div></div>
-        <div class="pending-pairing" id="pending-pairing" hidden><div><strong id="pending-name"></strong><p>正在请求配对，只确认你手边的手机。</p></div><div><button id="reject-pair" class="quiet">拒绝</button><button id="approve-pair" class="primary">允许配对</button></div></div>
       </section>
 
       <section id="settings-view" hidden>
-        <div class="eyebrow">偏好设置</div><h1>按你的习惯来</h1><p class="subtitle">所有设置和收件记录保存在这台电脑。</p>
+        <h1>设置</h1><p class="subtitle">所有设置和收件记录保存在这台电脑。</p>
+        <h2 class="settings-group-title">接收</h2>
         <div class="settings-list">
-          <label class="setting-row" for="auto-copy"><div><strong>收到手机文字后，复制到电脑剪贴板</strong><p>打开后会覆盖电脑当前剪贴板；默认关闭。不会自动读取电脑剪贴板。</p></div><input type="checkbox" id="auto-copy" role="switch"></label>
-          <div class="setting-row"><div><strong>文件收件目录</strong><p id="inbox-path"></p></div><button class="quiet" id="settings-inbox">在资源管理器打开 ↗</button></div>
+          <label class="setting-row" for="auto-copy"><div><strong>收到手机文字后，复制到电脑剪贴板</strong><p>打开后会覆盖电脑当前剪贴板；默认关闭。不会自动读取电脑剪贴板。</p></div><input type="checkbox" id="auto-copy" class="switch" role="switch"></label>
+          <div class="setting-row"><div><strong>文件收件目录</strong><p id="inbox-path"></p></div><button type="button" class="quiet" id="settings-inbox">打开收件目录</button></div>
           <div class="setting-row"><div><strong>本地暂存空间</strong><p id="storage-usage"></p><p>删除收发记录时，会同时删除 NearBridge 保存的对应文件副本。</p></div></div>
-          <div class="setting-row"><div><strong>手机连接权限</strong><p id="revoke-description">尚未配对</p></div><button class="danger quiet" id="revoke-device">解除配对</button></div>
         </div>
-        <div class="scope-note"><h2>这个版本的边界</h2><p>手机端是浏览器页面，收发时请保持页面打开。暂不提供手机后台剪贴板同步、投屏、通知同步或任意远程命令执行。</p></div>
+        <h2 class="settings-group-title native-only">传输</h2>
+        <div class="settings-list native-only">
+          <div class="setting-row"><div><strong>待发队列与回执</strong><p>手机离线时，文件和操作会留在队列里。重试会继续同一项操作，不会因回执丢失而重复发送或执行。</p></div><button type="button" class="quiet" id="settings-retry"><svg class="icon" aria-hidden="true"><use href="#i-retry"/></svg>重试</button></div>
+        </div>
+        <h2 class="settings-group-title">手机</h2>
+        <div class="settings-list">
+          <div class="setting-row"><div><strong>手机连接权限</strong><p id="revoke-description">尚未配对</p></div><button type="button" class="danger quiet" id="revoke-device">解除配对</button></div>
+        </div>
+        <div class="scope-note"><h2>这个版本的边界</h2><p id="scope-text">手机端是浏览器页面，收发时请保持页面打开。暂不提供手机后台剪贴板同步、投屏、通知同步或任意远程命令执行。</p></div>
       </section>
     </main>
-    <footer class="workspace-footer"><span>NearBridge · 个人互联实验室</span><span id="footer-detail">文件与文字，直接抵达。</span></footer>
+    <footer class="workspace-footer"><span>NearBridge · 加密直连</span><span id="footer-detail">文件与文字只在你的设备之间传输。</span></footer>
   </div>
-  <div id="pair-banner" class="pair-banner" hidden><div><strong id="banner-name"></strong><span>需要在电脑确认配对</span></div><button id="banner-review" class="primary">查看请求</button></div>
+
+  <div id="drop-overlay" class="drop-overlay" hidden aria-hidden="true"><div><span class="drop-badge"><svg class="icon"><use href="#i-down"/></svg></span><strong id="drop-title">松手，发到手机</strong><span id="drop-detail">支持一次放入多个文件</span></div></div>
+  <div id="pair-banner" class="pair-banner" hidden><svg class="icon" aria-hidden="true"><use href="#i-phone"/></svg><div><strong id="banner-name"></strong><span>需要在电脑确认配对</span></div><button type="button" id="banner-review" class="primary">查看请求</button></div>
   <div id="toast" role="status" aria-live="polite" hidden></div>
-  <dialog id="confirm-dialog"><h2 id="confirm-title"></h2><p id="confirm-message"></p><div><button id="confirm-cancel" class="quiet">取消</button><button id="confirm-ok" class="primary">确认</button></div></dialog>
-  <dialog id="copy-dialog"><h2>复制这段文字</h2><p>浏览器没有授予剪贴板权限，可以长按下方文字复制。</p><textarea id="copy-fallback" readonly rows="6"></textarea><button id="copy-close" class="primary">完成</button></dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message"><h2 id="confirm-title"></h2><p id="confirm-message"></p><div><button type="button" id="confirm-cancel" class="quiet">取消</button><button type="button" id="confirm-ok" class="primary">确认</button></div></dialog>
+  <dialog id="copy-dialog" aria-labelledby="copy-title"><h2 id="copy-title">复制这段文字</h2><p>浏览器没有授予剪贴板权限，可以长按下方文字复制。</p><textarea id="copy-fallback" readonly rows="6"></textarea><button type="button" id="copy-close" class="primary">完成</button></dialog>
 </body>
 </html>

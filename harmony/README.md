@@ -1,12 +1,14 @@
 # NearBridge · HarmonyOS 原生端
 
-## Windows 开发与配对（0.7）
+## Windows / Mac 开发与配对（0.8）
 
-当前源码为 **0.7.0 / 700**，主要连接 Windows；布局、协议和包名保持不变。系统分享入口改为“发送到电脑”。旧 Mac 真机记录不能视作 Windows 已验收。
+当前源码为 **0.8.0 / 800**，同时支持 Windows 和 Mac。“我的电脑”保存多台配对并选择当前目标，首页与系统分享入口统一为“发送到电脑”。原有包名与互联协议保持不变。
 
 安装 Windows 版官方 DevEco Studio，脚本默认检查 C:\Program Files\Huawei\DevEco Studio 等目录。自定义安装位置可在 PowerShell 设置 NEARBRIDGE_DEVECO_APP，然后运行 npm run build:phone。SDK 在其他目录时可设置 DEVECO_SDK_HOME。脚本读取 tools/node/node.exe、Hvigor、jbr 和 sdk，已有签名配置不会覆盖。签名仍由自己的华为账号和设备授权完成。
 
-Windows 进入“设备连接”，手机扫原生二维码，再在电脑允许。自动/仅蓝牙/仅局域网及可靠操作逻辑不变；Windows 蓝牙从窗口顶部开启，附近列表可能显示 Windows 系统设备名。
+在目标电脑打开原生配对码，手机“我的电脑 → 添加电脑”扫码，再在该电脑允许。升级保留当前配对及已有文件；旧版曾覆盖掉的另一台需要再扫码添加一次。自动/仅蓝牙/仅局域网分别按电脑保存；Windows 蓝牙从互传页“你的连接”开启，附近列表可能显示 Windows 系统设备名。
+
+每台电脑分别保存根证书、会话、公钥、蓝牙选择、待发文件、已收文件和待确认操作。切换时清空旧同步快照并取消旧请求；传输或执行中拒绝切换。添加失败恢复原目标，重复扫描同一公钥更新原条目。系统分享仅在开始发送前选择目标。手机仍只与当前电脑收发，不同时对两台广播内容。
 
 2026-10-27 已使用 Windows 版 DevEco Studio 26.0.0.851 / SDK 26.0.0.105 完成官方签名、构建，并覆盖安装到 Mate 70 Pro+（API 26），核对版本为 0.7.0 / 700。Windows 扫码配对、局域网文件接收回执与 BLE 32 KB 双向自检已有真机证据，见 [Windows 验证记录](../docs/WINDOWS-VERIFICATION.md)。以下 Mac 说明与验证记录作为历史保留；Windows 使用以 [Windows 说明](../windows/README.md) 为准。
 

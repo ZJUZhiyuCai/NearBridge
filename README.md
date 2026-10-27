@@ -1,26 +1,27 @@
 # NearBridge
 
-**Windows 与 HarmonyOS 的本地互联工具。文件、文字、快捷指令，直接在两台设备之间流动。**
+**Windows、Mac 与 HarmonyOS 的本地互联工具。文件、文字、快捷指令，直接在你的设备之间流动。**
 
-Windows 托盘 / WebView2 · ArkTS / ArkUI · 局域网 HTTPS · 实验性 BLE · MIT
+Windows 托盘 / WebView2 · Mac 菜单栏 / SwiftUI · HarmonyOS ArkUI · 局域网 HTTPS · 实验性 BLE · MIT
 
 [Windows 使用与构建](windows/README.md) · [鸿蒙工程](harmony/README.md) · [架构](docs/ARCHITECTURE.md) · [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) · [更新记录](CHANGELOG.md)
 
-0.7 将主要电脑端改为 Windows。鸿蒙界面布局、系统分享、双向收发、私有 CA 与公钥固定、显式配对、断点续传、SHA-256 回执、可靠操作和自动选路沿用现有实现。Windows 使用托盘与资源管理器入口，自定义工作流使用本机明确选定的 Windows 快捷方式。不需要微信或云端中转。
+0.8 保留 Windows 和 Mac 两种电脑端，统一互传与快捷指令体验。手机“我的电脑”可同时保存多台电脑，选择当前收发目标；添加第二台不再替换第一台。每台电脑分别保存配对凭据、蓝牙选择、待发队列和已收文件，切换不会把原来的待确认操作发到另一台。私有 CA、公钥固定、显式批准、断点续传、SHA-256 回执和自动选路继续沿用。
 
 ## 当前能力
 
-| 能力 | Windows / 鸿蒙状态 |
+| 能力 | 状态 |
 | --- | --- |
 | 托盘、窗口宿主、Ctrl+Alt+空格、拖放、“发送到”、文件夹 ZIP | 已实现；需先构建 Windows 客户端 |
 | 鸿蒙扫码、照片/文件选择、图库分享、手机快捷指令 | 保留；提示改为电脑，分享入口为“发送到电脑” |
+| 手机保存 Windows 和 Mac、切换当前电脑 | 最多 8 台；首页和系统分享页明确显示目标，各台凭据与记录分开 |
 | 双向文件、断点续传、SHA-256 收件回执 | 保留；Windows 编译客户端有丢响应/重启续传回归 |
 | 文字、工作流可靠重试 | 两端持久化操作编号，七天内复用回执 |
 | 增量同步、即时通知、自动/仅蓝牙/仅局域网 | 保留；Windows 使用同一 delta-v1 协议 |
-| BLE 文字、小文件与工作流 | Windows GATT 中继已实现；本机与鸿蒙手机已完成 32 KB 双向自检，大文件与长期稳定性待验收 |
+| BLE 文字、小文件与工作流 | Windows GATT / Mac CoreBluetooth 使用相同协议；0.7 Windows 小文件自检已有记录，大文件与长期稳定性待验收 |
 | 锁屏手机后台常驻、投屏、通知镜像、Wi-Fi Direct/AWDL | 仍未实现 |
 
-2026-10-27 已在 Windows 完成官方鸿蒙签名构建、Mate 70 Pro+ 覆盖安装、扫码配对、局域网文件接收回执与 BLE 小文件双向校验，详见 [Windows 验证记录](docs/WINDOWS-VERIFICATION.md)。早期 Mac 真机记录保留在[历史验证记录](docs/VERIFICATION.md)和[蓝牙记录](docs/BLUETOOTH.md)。
+0.7 的 Windows 真机基线见 [Windows 验证记录](docs/WINDOWS-VERIFICATION.md)。早期 Mac 真机记录保留在[历史验证记录](docs/VERIFICATION.md)和[蓝牙记录](docs/BLUETOOTH.md)；旧版本记录不代表新版所有交互都已真机验收。
 
 ## 在 Windows 开始
 
@@ -38,6 +39,18 @@ npm run start:windows
 
 产物为 `dist/windows/NearBridge.exe`。可选运行 `npm run install:windows`，安装到 `%LOCALAPPDATA%\Programs\NearBridge`，添加开始菜单和资源管理器“发送到”入口。更新前先退出托盘程序。Windows 产物目前没有商业代码签名。详细要求与路径覆盖见 [Windows 说明](windows/README.md)。
 
+## 在 Mac 开始
+
+需要 macOS 13+、Node.js 22.13+、Xcode Command Line Tools（Swift），以及 OpenSSL。
+
+```sh
+npm ci --ignore-scripts
+npm run build:mac
+npm run install:mac
+```
+
+Mac 保留 SwiftUI 窗口、菜单栏、Finder 分享/拖放和本机 Shortcuts。它与 Windows 使用同一套服务和手机端；可分别配对到手机“我的电脑”，无需移除另一台。Mac 安装器会保留已有应用目录身份和用户数据。
+
 ### HarmonyOS
 
 在 Windows 安装官方 DevEco Studio，配置自己的华为开发者账号、设备调试授权与签名。手机工程仍兼容 HarmonyOS 6，应用包名保留，覆盖安装可保留原数据。
@@ -52,12 +65,13 @@ npm run build:phone
 
 ## 日常使用
 
-1. 两端连接同一局域网。Windows 进入“设备连接”，手机 NearBridge 扫描原生二维码，再在电脑批准。多个网卡时先选择手机可达的地址。
-2. **手机 → Windows**：图库或文件管理 → 分享 → **发送到电脑**；也可在 NearBridge 首页选择文件、照片或发送文字。
-3. **Windows → 手机**：拖文件到 NearBridge、点顶部“选择文件 / 发送文件夹”，或资源管理器右键 → 发送到 → NearBridge。手机保持 NearBridge 前台运行即可自动收件，再按需“另存为”。
-4. **手机控制 Windows**：运行“打开收件目录”“保存文字便签”，或电脑明确加入并启用的 `.lnk` 工作流。Windows 回执表示已请求启动；后续业务结果仍需在电脑确认。
-5. **连接方式**：手机“连接与设置”选择自动、仅蓝牙或仅局域网。自动模式优先局域网，失败时尝试已选蓝牙电脑；传输期间保持当前线路。使用 BLE 前，在 Windows 点“开启蓝牙”。
-6. **结果未确认**：点“重试确认”继续原操作。先检查电脑结果，再决定是否“结束重试”；结束重试不会撤销已执行动作。
+1. 两端连接同一局域网，在目标 Windows 或 Mac 打开原生配对码，手机“我的电脑 → 添加电脑”扫码，再在目标电脑批准。多个网卡时先选择手机可达的地址。
+2. **选目标**：手机首页或“我的电脑”切换当前电脑；系统分享页也能在开始发送前选择目标。升级会保留当前配对；旧版曾被替换的另一台电脑需要再扫码一次，之后即可来回切换。
+3. **手机 → 电脑**：图库或文件管理 → 分享 → **发送到电脑**；也可在 NearBridge 首页选择文件、照片或发送文字。确认页面显示的是期望目标。
+4. **电脑 → 手机**：Windows 拖入文件、使用互传页文件/文件夹按钮，或资源管理器“发送到”；Mac 使用窗口拖放或 Finder 分享。手机保持 NearBridge 前台并选择这台电脑，完成后可“另存为”。
+5. **手机快捷指令**：内置“打开收件目录”“保存文字便签”一致。Windows 自定义项来自本机明确加入的 `.lnk`，Mac 来自本机 Shortcuts；只显示当前电脑已启用的项目。
+6. **连接方式**：每台电脑分别选择自动、仅蓝牙或仅局域网。自动优先局域网，失败时尝试该电脑已选的蓝牙设备；传输期间保持线路。电脑端先开启“允许手机用蓝牙连接”，手机再选择对应设备。
+7. **结果未确认**：切回对应电脑点“重试确认”继续原操作。先检查结果，再决定是否“结束重试”；结束重试不会撤销已执行动作。
 
 关闭 Windows 窗口后继续驻留托盘；Ctrl+Alt+空格或托盘图标可唤出。退出使用托盘菜单。电脑需要保持唤醒，鸿蒙当前需要前台运行。
 
@@ -74,7 +88,7 @@ npm run benchmark          # 隔离的本机变更通知基准
 npm run benchmark:active   # 完整快照与增量响应对照
 ```
 
-CI 增加 Windows + .NET 编译与原生客户端测试，保留 Linux Node 22/24/26 与 macOS 检查。原 `macos/`、`build:mac`、`install:mac` 作为已有实现保留；主使用流程面向 Windows。鸿蒙签名与真机验收独立进行，见[测试矩阵](docs/TESTING.md)。
+CI 包含 Windows + .NET 编译与原生客户端测试、Linux Node 22/24/26，以及 macOS Swift 构建与签名检查。Windows 和 Mac 都继续维护，鸿蒙签名与真机验收独立进行，见[测试矩阵](docs/TESTING.md)。本次 Claude 协作、数据迁移和实测范围见 [0.8 统一体验验证记录](docs/UNIFIED-0.8.md)。
 
 ## 数据与边界
 

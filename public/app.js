@@ -3,6 +3,8 @@ const nativeWindows = Boolean(window.nearBridgeWindows && window.chrome?.webview
 const nativePost = message => window.chrome.webview.postMessage(message);
 const $ = (id) => document.getElementById(id);
 const all = (selector) => [...document.querySelectorAll(selector)];
+const SVG_NS = "http://www.w3.org/2000/svg";
+// role 是协议角色（"mac" = 电脑端，"phone" = 手机浏览器），不代表电脑平台。
 let role = "mac";
 let snapshot;
 let currentView = "transfer";
@@ -16,6 +18,59 @@ let uploading = false;
 let stateSequence = 0;
 let pairToken = new URLSearchParams(location.hash.slice(1)).get("pair");
 history.replaceState(null, "", location.pathname);
+// Windows 宿主状态：仅在原生窗口中由 WebView2 消息更新。
+let hostActions = new Set();
+let hostQueue = { pending: false, count: 0 };
+let hostBluetooth = null;
+let nativeSendTimer;
+let bluetoothTimer;
+let dragDepth = 0;
+document.body.classList.toggle("native", nativeWindows);
+
+// 平台只来自 snapshot.platform；旧服务缺失时统一称“电脑”。
+const PLATFORM_NAMES = new Map([["windows", "Windows"], ["macos", "Mac"]]);
+const FOLDER_ACTIONS = new Map([["windows", "在资源管理器中打开"], ["macos", "在访达中打开"]]);
+const platformName = (data) => PLATFORM_NAMES.get(data?.platform) || "";
+
+// 与 Theme.ets / BridgeDesign.swift 相同的色调与哈希，同一快捷指令三端同色。
+const TONES = [
+  ["#4DA3FF", "#0A6CFF"], ["#7D7AFF", "#4C3FE0"], ["#C77DFF", "#8A3FD9"], ["#FF7EB3", "#F0407A"],
+  ["#FF8A70", "#EC4A3B"], ["#FFB35C", "#FF7A00"], ["#6CCBFF", "#1C8FE8"], ["#A3A9B5", "#5F6673"],
+];
+const GLYPH_RULES = [
+  ["camera", ["截图", "截屏", "拍", "相机", "照片"]],
+  ["music", ["音乐", "播放", "歌", "音量", "静音", "声音"]],
+  ["moon", ["睡眠", "休眠", "勿扰", "专注", "晚安", "夜"]],
+  ["lock", ["锁", "离开"]],
+  ["doc", ["文档", "笔记", "备忘", "记录", "写"]],
+  ["open", ["打开", "网页", "浏览", "链接", "启动"]],
+  ["clipboard", ["剪贴板", "复制", "粘贴"]],
+  ["download", ["下载", "保存", "备份"]],
+  ["sun", ["亮度", "灯", "屏幕", "显示器"]],
+];
+function stableHash(key) {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) % 1000003;
+  return hash;
+}
+function glyphFor(name) {
+  for (const [key, words] of GLYPH_RULES)
+    if (words.some((word) => name.includes(word))) return key;
+  return "bolt";
+}
+const IMAGE_EXT = ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "bmp"];
+const isImageName = (name) => IMAGE_EXT.includes(String(name || "").split(".").pop().toLowerCase());
+
+function icon(name, className = "icon") {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", className);
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const use = document.createElementNS(SVG_NS, "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
 
 function toast(message, error = false) {
   clearTimeout(toastTimer);
@@ -67,30 +122,54 @@ function timestamp(value) {
     hour12: false,
   }).format(date);
 }
-function setConnection(text, connected = false) {
+function clock(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+}
+function dayLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = new Date(date);
+  day.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - day) / 86400000);
+  if (diff === 0) return "今天";
+  if (diff === 1) return "昨天";
+  return new Intl.DateTimeFormat("zh-CN", {
+    ...(date.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }),
+    month: "long",
+    day: "numeric",
+  }).format(date);
+}
+function setConnection(text, connected = false, warn = false) {
   $("connection").querySelector("span").textContent = text;
   $("connection").classList.toggle("connected", connected);
+  $("connection").classList.toggle("warn", warn && !connected);
 }
 
+const VIEW_LABELS = { transfer: "互传", workflows: "快捷指令", pairing: "手机连接", settings: "设置" };
 function changeView(view) {
+  const changed = currentView !== view;
   currentView = view;
   for (const name of ["transfer", "workflows", "pairing", "settings"])
     $(`${name}-view`).hidden = name !== view;
-  all("[data-nav]").forEach((button) =>
-    button.classList.toggle("active", button.dataset.nav === view),
-  );
-  $("page-label").textContent = {
-    transfer: "收发",
-    workflows: "工作流",
-    pairing: "设备连接",
-    settings: "偏好设置",
-  }[view];
+  all("[data-nav]").forEach((button) => {
+    const active = button.dataset.nav === view;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  $("page-label").textContent = VIEW_LABELS[view];
   $("pair-banner").hidden = !snapshot?.pending || view === "pairing";
+  if (changed) window.scrollTo(0, 0);
   if (view === "pairing") loadPairing();
 }
 all("[data-nav]").forEach((button) =>
   button.addEventListener("click", () => changeView(button.dataset.nav)),
 );
+$("nav-device").addEventListener("click", () => changeView("pairing"));
 $("pair-details").addEventListener("click", () => changeView("pairing"));
 $("banner-review").addEventListener("click", () => changeView("pairing"));
 $("workflow-connect").addEventListener("click", () => changeView("pairing"));
@@ -99,17 +178,28 @@ function sendTab(kind) {
   for (const name of ["file", "text"]) {
     $(`${name}-tab`).classList.toggle("selected", name === kind);
     $(`${name}-tab`).setAttribute("aria-selected", String(name === kind));
+    $(`${name}-tab`).tabIndex = name === kind ? 0 : -1;
     $(`${name}-panel`).hidden = name !== kind;
   }
 }
 for (const name of ["file", "text"])
   $(`${name}-tab`).addEventListener("click", () => sendTab(name));
+// ARIA tabs：左右方向键、Home、End 在两个发送类型之间切换。
+document.querySelector(".send-tabs").addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const current = $("file-tab").classList.contains("selected") ? "file" : "text";
+  const target = event.key === "Home" ? "file" : event.key === "End" ? "text" : current === "file" ? "text" : "file";
+  sendTab(target);
+  $(`${target}-tab`).focus();
+});
 all("[data-filter]").forEach((button) =>
   button.addEventListener("click", () => {
     filter = button.dataset.filter;
-    all("[data-filter]").forEach((value) =>
-      value.classList.toggle("selected", value === button),
-    );
+    all("[data-filter]").forEach((value) => {
+      value.classList.toggle("selected", value === button);
+      value.setAttribute("aria-pressed", String(value === button));
+    });
     renderHistory();
   }),
 );
@@ -147,6 +237,7 @@ function linkFrom(text) {
 }
 function makeButton(label, action, className = "") {
   const button = document.createElement("button");
+  button.type = "button";
   button.textContent = label;
   button.className = className;
   button.addEventListener("click", async () => {
@@ -178,6 +269,17 @@ async function copyItem(item) {
   }
 }
 
+function emptyState(iconName, heading, detail) {
+  const empty = document.createElement("div");
+  empty.className = "history-empty";
+  const title = document.createElement("strong");
+  title.textContent = heading;
+  const subtitle = document.createElement("span");
+  subtitle.textContent = detail;
+  empty.append(icon(iconName), title, subtitle);
+  return empty;
+}
+
 function renderHistory() {
   if (!snapshot) return;
   const items = snapshot.items.filter(
@@ -187,24 +289,39 @@ function renderHistory() {
   );
   $("item-count").textContent = snapshot.items.length;
   const fragment = document.createDocumentFragment();
-  if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "history-empty";
-    const title = document.createElement("strong");
-    title.textContent = "这里还没有收发记录";
-    const subtitle = document.createElement("span");
-    subtitle.textContent = "传一张照片，或给另一台设备留一段文字。";
-    empty.append(title, subtitle);
-    fragment.append(empty);
-  }
+  if (!items.length)
+    fragment.append(
+      snapshot.items.length
+        ? emptyState("text", "没有符合筛选的记录", "换一个筛选条件看看。")
+        : emptyState(
+            "transfer",
+            "这里还没有收发记录",
+            role === "mac" ? "把文件拖进窗口，或给手机留一段文字。" : "传一张照片，或给电脑留一段文字。",
+          ),
+    );
+  let lastDay = "";
   for (const item of items) {
+    const day = dayLabel(item.createdAt);
+    if (day && day !== lastDay) {
+      const header = document.createElement("div");
+      header.className = "history-day";
+      header.textContent = day;
+      fragment.append(header);
+      lastDay = day;
+    }
+    const outgoing = item.source === role;
     const row = document.createElement("article");
     row.className = "history-row";
-    const icon = document.createElement("div");
-    icon.className = "item-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.textContent =
-      item.kind === "file" ? "↧" : linkFrom(item.text) ? "↗" : "T";
+    const badge = document.createElement("div");
+    badge.className = outgoing ? "item-icon" : "item-icon incoming";
+    badge.setAttribute("aria-hidden", "true");
+    const direction = document.createElement("span");
+    direction.className = "direction";
+    direction.append(icon(outgoing ? "up" : "down"));
+    badge.append(
+      icon(item.kind === "file" ? (isImageName(item.name) ? "image" : "file") : linkFrom(item.text) ? "link" : "text"),
+      direction,
+    );
     const main = document.createElement("div");
     main.className = "item-main";
     const title = document.createElement("p");
@@ -212,9 +329,9 @@ function renderHistory() {
     title.textContent = item.kind === "file" ? item.name : item.text;
     const meta = document.createElement("div");
     meta.className = "item-meta";
-    const direction = document.createElement("span");
-    direction.textContent =
-      item.source === role
+    const state = document.createElement("span");
+    state.textContent =
+      outgoing
         ? role === "mac"
           ? item.receivedAt
             ? "发出 · 手机已收取"
@@ -222,10 +339,16 @@ function renderHistory() {
             ? "发出 · 手机可取用"
             : "暂存 · 待手机配对"
           : "发出 · 已保存到电脑"
-        : `收到 · 来自${item.source === "mac" ? " 电脑" : "手机"}`;
+        : `收到 · 来自${item.source === "mac" ? "电脑" : snapshot.device?.name || "手机"}`;
+    // 回执：手机确认收取后用蓝色勾标出。
+    if (outgoing && role === "mac" && item.receivedAt) {
+      state.className = "receipt";
+      state.prepend(icon("check"));
+    }
     const date = document.createElement("span");
-    date.textContent = timestamp(item.createdAt);
-    meta.append(direction, date);
+    date.textContent = day ? clock(item.createdAt) : timestamp(item.createdAt);
+    date.title = timestamp(item.createdAt);
+    meta.append(state, date);
     if (item.kind === "file") {
       const size = document.createElement("span");
       size.textContent = bytes(item.size);
@@ -236,12 +359,15 @@ function renderHistory() {
     actions.className = "item-actions";
     if (item.kind === "text") {
       actions.append(makeButton("复制", () => copyItem(item)));
-      if (item.text.length > 100 || item.text.split("\n").length > 3)
-        actions.append(
-          makeButton("展开", () => {
-            title.classList.toggle("expanded");
-          }),
-        );
+      if (item.text.length > 100 || item.text.split("\n").length > 3) {
+        const expand = makeButton("展开", () => {
+          const expanded = title.classList.toggle("expanded");
+          expand.textContent = expanded ? "收起" : "展开";
+          expand.setAttribute("aria-expanded", String(expanded));
+        });
+        expand.setAttribute("aria-expanded", "false");
+        actions.append(expand);
+      }
       if (linkFrom(item.text)) {
         if (role === "mac")
           actions.append(
@@ -270,7 +396,7 @@ function renderHistory() {
     }
     if (role === "mac") {
       const remove = makeButton(
-        "×",
+        "",
         async () => {
           if (
             await confirmAction(
@@ -287,13 +413,15 @@ function renderHistory() {
         },
         "remove",
       );
+      remove.append(icon("close"));
+      remove.title = "删除";
       remove.setAttribute(
         "aria-label",
         `删除${item.kind === "file" ? item.name : "文字记录"}`,
       );
       actions.append(remove);
     }
-    row.append(icon, main, actions);
+    row.append(badge, main, actions);
     fragment.append(row);
   }
   $("history").replaceChildren(fragment);
@@ -306,9 +434,11 @@ async function refreshState() {
   renderState(mergeState(snapshot, { revision: data.revision, state: data }));
 }
 function renderState(data) {
-  document.querySelector('.sidebar-bottom small').textContent = `本地运行 · v${data.version}`;
+  $("app-version").textContent = `本地运行 · v${data.version}`;
   const previous = snapshot;
   snapshot = data;
+  const platform = platformName(data);
+  const phoneOnline = Boolean(data.paired && data.device?.connected);
   $("recipient").textContent =
     role === "phone"
       ? data.name
@@ -316,21 +446,28 @@ function renderState(data) {
         ? data.device.name +
           (data.device.connected ? " · 已连接" : " · 离线时可先暂存")
         : "可以先放入文件，手机连接后取用";
+  $("recipient-kicker").textContent = role === "phone" ? `手机 → ${platform || "电脑"}` : "这台电脑 → 手机";
+  $("brand-platform").textContent = platform ? `${platform} 版` : "本地互联";
+  $("computer-platform").textContent = platform || "电脑";
+  $("crumb-root").textContent = data.name || "NearBridge";
+  $("settings-inbox").textContent = FOLDER_ACTIONS.get(data.platform) || "打开收件目录";
   $("mac-name").textContent = data.name;
-  $("phone-name").textContent = data.paired ? data.device.name : "等待华为手机";
+  $("phone-name").textContent = data.paired ? data.device.name : "等待手机";
   $("phone-state").textContent = data.paired
     ? data.device.connected
       ? "在线 · 可收发"
-      : "已配对 · 等待手机打开页面"
+      : "已配对 · 等待手机打开 NearBridge"
     : "扫码完成首次连接";
-  $("phone-dot").classList.toggle(
-    "online",
-    Boolean(data.paired && data.device.connected),
-  );
+  $("phone-dot").classList.toggle("online", phoneOnline);
+  const deviceState = data.paired ? (phoneOnline ? "已连接" : "不在线") : data.pending ? "有配对请求" : "尚未配对";
+  $("nav-device-name").textContent = data.paired ? data.device.name : "连接手机";
+  $("nav-device-state").textContent = deviceState;
+  $("nav-device-dot").className = `dot${phoneOnline ? " online" : data.pending ? " warn" : ""}`;
+  $("nav-device").setAttribute("aria-label", `手机：${data.paired ? data.device.name : "未连接"}，${deviceState}。打开手机连接`);
   $("mini-pairing").hidden = Boolean(data.paired);
   $("paired-summary").hidden = !data.paired;
   $("paired-summary").textContent = data.paired
-    ? `已配对：${data.device.name}。手机可以收藏连接页面；更换手机时请先在偏好设置中解除配对。`
+    ? `已配对：${data.device.name}。手机可以收藏连接页面；更换手机时请先在设置中解除配对。`
     : "";
   $("refresh-pairing").disabled = data.paired || (nativeWindows && Boolean(data.pending));
   if (nativeWindows) $("network-select").disabled = Boolean(data.pending);
@@ -385,13 +522,17 @@ function renderWorkflows() {
     role === "phone" || Boolean(snapshot.device?.connected),
   );
   const fragment = document.createDocumentFragment();
-  snapshot.workflows.forEach((workflow, index) => {
+  snapshot.workflows.forEach((workflow) => {
     const row = document.createElement("div");
     row.className = "workflow-row";
     row.classList.toggle("disabled", !workflow.enabled);
-    const number = document.createElement("span");
-    number.className = "workflow-number";
-    number.textContent = String(index + 1).padStart(2, "0");
+    const [top, bottom] = TONES[stableHash(String(workflow.id)) % TONES.length];
+    const tile = document.createElement("span");
+    tile.className = "tone-tile";
+    tile.setAttribute("aria-hidden", "true");
+    tile.style.setProperty("--tone-top", top);
+    tile.style.setProperty("--tone-bottom", bottom);
+    tile.append(icon(glyphFor(String(workflow.name))));
     const text = document.createElement("div");
     text.className = "workflow-description";
     const name = document.createElement("h2");
@@ -406,6 +547,8 @@ function renderWorkflows() {
       label.className = "workflow-toggle";
       const input = document.createElement("input");
       input.type = "checkbox";
+      input.className = "switch";
+      input.setAttribute("role", "switch");
       input.checked = workflow.enabled;
       input.setAttribute("aria-label", `在手机启用${workflow.name}`);
       input.addEventListener("change", async () => {
@@ -420,11 +563,11 @@ function renderWorkflows() {
           input.checked = !input.checked;
         }
       });
-      label.append(input, document.createTextNode("手机可用"));
+      label.append(document.createTextNode("手机可用"), input);
       actions.append(label);
     }
     const run = makeButton(
-      role === "mac" ? "试运行 ▷" : "运行 ▷",
+      role === "mac" ? "试运行" : "运行",
       async () => {
         if (nativeWindows) { nativePost({ type: "workflow", id: workflow.id }); return; }
         const requestId = crypto.randomUUID
@@ -436,23 +579,24 @@ function renderWorkflows() {
         await refreshState();
         toast("请求已交给电脑，执行结果会显示在下方");
       },
-      "primary",
+      role === "mac" ? "quiet" : "primary",
     );
+    run.prepend(icon("play"));
     run.disabled = !workflow.enabled || busy;
     run.setAttribute(
       "aria-label",
       `${role === "mac" ? "试运行" : "运行"}：${workflow.name}`,
     );
     actions.append(run);
-    row.append(number, text, actions);
+    row.append(tile, text, actions);
     fragment.append(row);
   });
-  if (!snapshot.workflows.length) {
-    const empty = document.createElement("div");
-    empty.className = "history-empty";
-    empty.textContent = "电脑尚未启用工作流，请先在电脑面板选择。";
-    fragment.append(empty);
-  }
+  if (!snapshot.workflows.length)
+    fragment.append(
+      role === "mac"
+        ? emptyState("bolt", "还没有快捷指令", "用下方的“载入”把电脑上的快捷指令加入手机面板。")
+        : emptyState("bolt", "电脑还没有开放快捷指令", "请先在电脑的 NearBridge 中启用。"),
+    );
   $("workflow-list").replaceChildren(fragment);
   const jobs = document.createDocumentFragment();
   for (const job of snapshot.jobs) {
@@ -462,10 +606,12 @@ function renderWorkflows() {
     state.className = `job-status ${job.status}`;
     state.textContent = {
       running: "执行中",
+      queued: "等待中",
+      pending: "等待中",
       succeeded: "已完成",
       failed: "未完成",
       interrupted: "已中断",
-    }[job.status];
+    }[job.status] || job.status;
     const main = document.createElement("div");
     main.className = "job-main";
     const name = document.createElement("strong");
@@ -478,12 +624,8 @@ function renderWorkflows() {
     row.append(state, main, time);
     jobs.append(row);
   }
-  if (!snapshot.jobs.length) {
-    const empty = document.createElement("div");
-    empty.className = "history-empty";
-    empty.textContent = "还没有执行记录。点一个按钮，电脑就会开始处理。";
-    jobs.append(empty);
-  }
+  if (!snapshot.jobs.length)
+    jobs.append(emptyState("check", "还没有执行记录", "点一个按钮，电脑就会开始处理。"));
   $("workflow-jobs").replaceChildren(jobs);
 }
 
@@ -502,8 +644,8 @@ $("load-shortcuts").addEventListener("click", async () => {
     );
     $("add-shortcut").disabled = !result.shortcuts.length;
     $("shortcut-hint").textContent = result.shortcuts.length
-      ? "加入后，已配对手机可以直接执行。指令自身的授权和确认仍由 Windows 处理。"
-      : nativeWindows ? "从窗口顶部打开“快捷方式目录”，放入 .lnk 快捷方式后重新载入。" : "没有找到快捷指令，请先在电脑配置后重新载入。";
+      ? `加入后，已配对手机可以直接执行。指令自身的授权和确认仍由${platformName(snapshot) || "电脑"}处理。`
+      : nativeWindows ? "打开快捷方式目录，放入 .lnk 快捷方式后重新载入。" : "没有找到快捷指令，请先在电脑配置后重新载入。";
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -526,7 +668,7 @@ $("add-shortcut").addEventListener("click", async () => {
       id: $("shortcut-select").value,
     });
     await refreshState();
-    toast("已加入手机工作流面板");
+    toast("已加入手机快捷指令面板");
   } catch (error) {
     toast(error.message, true);
   }
@@ -567,7 +709,7 @@ async function loadPairing(force = false) {
         : "未发现局域网地址，请连接 Wi-Fi 后重启 NearBridge。";
     $("fingerprint").textContent = data.fingerprint || "";
     $("mini-pair-caption").textContent = data.qr
-      ? "用手机扫描，连接这台电脑"
+      ? nativeWindows ? "在手机 NearBridge 点“添加电脑”，扫描此码" : "用手机扫描，连接这台电脑"
       : data.links.length
         ? "手机已请求连接，请在电脑确认"
         : "连接 Wi-Fi 后重启，以生成二维码";
@@ -654,9 +796,23 @@ $("revoke-device").addEventListener("click", async () => {
   }
 });
 
+// 原生窗口：文字交给宿主后等待回执；只改按钮状态，不改发送与重试逻辑。
+function setNativeSending(sending) {
+  clearTimeout(nativeSendTimer);
+  const button = $("text-send");
+  button.disabled = sending;
+  button.classList.toggle("is-busy", sending);
+  button.setAttribute("aria-busy", String(sending));
+  if (sending) nativeSendTimer = setTimeout(() => setNativeSending(false), 20000);
+}
 $("text-panel").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (nativeWindows) { nativePost({ type: "text", text: $("message").value }); return; }
+  if (nativeWindows) {
+    if (!$("message").value.trim()) { toast("先输入要发送的文字或链接", true); $("message").focus(); return; }
+    setNativeSending(true);
+    nativePost({ type: "text", text: $("message").value });
+    return;
+  }
   const button = $("text-send");
   button.disabled = true;
   try {
@@ -675,6 +831,11 @@ $("text-panel").addEventListener("submit", async (event) => {
   } finally {
     button.disabled = false;
   }
+});
+$("message").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.isComposing) return;
+  event.preventDefault();
+  if (!$("text-send").disabled) $("text-panel").requestSubmit();
 });
 $("clipboard-send").addEventListener("click", async () => {
   if (nativeWindows) { nativePost({ type: "clipboard" }); return; }
@@ -796,8 +957,60 @@ $("dropzone").addEventListener("drop", (event) => {
   $("dropzone").classList.remove("dragging");
   sendFiles([...event.dataTransfer.files]);
 });
+$("choose-folder").addEventListener("click", () => {
+  if (nativeWindows) nativePost({ type: "chooseFolder" });
+});
+
+// 整窗投放：文件拖到窗口任意位置即可发送。投放区自己的处理保持不变，这里跳过投放区内的放下事件。
+const draggingFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
+const canDropAnywhere = () => Boolean(snapshot) && !uploading && !document.querySelector("dialog[open]");
+function showDropOverlay(show) {
+  if (show) {
+    $("drop-title").textContent =
+      role === "mac"
+        ? `松手，发到 ${snapshot?.paired ? snapshot.device.name : "手机"}`
+        : `松手，发到 ${snapshot?.name || "电脑"}`;
+    $("drop-detail").textContent =
+      role === "mac" && snapshot?.paired && !snapshot.device?.connected
+        ? "手机现在不在线，文件会先排队"
+        : "支持一次放入多个文件";
+  }
+  $("drop-overlay").hidden = !show;
+}
+document.addEventListener("dragenter", (event) => {
+  if (!draggingFiles(event) || !canDropAnywhere()) return;
+  dragDepth++;
+  showDropOverlay(true);
+});
+document.addEventListener("dragleave", (event) => {
+  if (!draggingFiles(event)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  const outside = event.clientX <= 0 || event.clientY <= 0 || event.clientX >= innerWidth || event.clientY >= innerHeight;
+  if (!dragDepth || outside) {
+    dragDepth = 0;
+    showDropOverlay(false);
+  }
+});
 document.addEventListener("dragover", (event) => event.preventDefault());
-document.addEventListener("drop", (event) => event.preventDefault());
+document.addEventListener("drop", (event) => {
+  event.preventDefault();
+  dragDepth = 0;
+  showDropOverlay(false);
+  if (event.target instanceof Element && event.target.closest("#dropzone")) return;
+  if (!canDropAnywhere() || !event.dataTransfer?.files.length) return;
+  changeView("transfer");
+  sendTab("file");
+  sendFiles([...event.dataTransfer.files]);
+});
+// Ctrl+O：选择文件（电脑端）。
+document.addEventListener("keydown", (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "o") return;
+  if (!snapshot || role !== "mac" || uploading || document.querySelector("dialog[open]")) return;
+  event.preventDefault();
+  changeView("transfer");
+  sendTab("file");
+  $("file-input").click();
+});
 
 function listenEvents() {
   if (nativeWindows) { listenNative(); return; }
@@ -806,11 +1019,11 @@ function listenEvents() {
   events.addEventListener("change", () =>
     refreshState().catch((error) => {
       if (error.status === 401) showPhonePairing();
-      else setConnection("连接已中断");
+      else setConnection("连接已中断", false, true);
     }),
   );
   events.addEventListener("error", async () => {
-    setConnection("正在重新连接");
+    setConnection("正在重新连接", false, true);
     try {
       const info = await api("/api/bootstrap");
       if (!info.authenticated) showPhonePairing();
@@ -827,7 +1040,7 @@ function showPhonePairing() {
   $("pair-submit").disabled = !pairToken;
   if (!pairToken) {
     $("pair-intro").textContent =
-      "在电脑的 NearBridge「设备连接」页刷新二维码，再用这台手机扫描。";
+      "在电脑的 NearBridge「手机连接」页刷新二维码，再用这台手机扫描。";
     $("pair-form").hidden = true;
   }
   setConnection("尚未配对");
@@ -896,18 +1109,78 @@ async function listenNative() {
       if (snapshot === base) renderState(mergeState(base, update));
       failures = 0;
     } catch {
-      setConnection("正在重新连接");
+      setConnection("正在重新连接", false, true);
       await new Promise(resolve => setTimeout(resolve, Math.min(15000, 1000 * 2 ** Math.min(failures++, 4))));
       await refreshState().catch(() => {});
     }
   }
 }
 
+// Windows 宿主：队列 / 回执条、蓝牙开关、能力声明。未声明的动作不显示入口，原生工具条继续提供。
+function renderHost() {
+  if (!nativeWindows) return;
+  const { pending, count } = hostQueue;
+  $("host-status").hidden = !pending && !(count > 0);
+  $("host-status").classList.toggle("pending", pending);
+  $("host-status-text").textContent = pending ? "有一项操作还在等待确认" : `${count} 个文件在待发队列`;
+  $("host-status-detail").textContent = pending
+    ? "重试会继续同一项操作，不会因回执丢失而重复发送或执行。"
+    : "手机上线后会继续发送，也可以现在重试。";
+  $("host-retry").textContent = pending ? "重试确认" : "重试发送";
+  $("host-forget").hidden = !pending || !hostActions.has("forget");
+  const canToggle = hostActions.has("bluetooth");
+  $("bluetooth-row").hidden = !hostBluetooth && !canToggle;
+  $("bluetooth-toggle").hidden = !canToggle;
+  $("bluetooth-toggle").checked = Boolean(hostBluetooth?.enabled);
+  $("bluetooth-state").textContent =
+    hostBluetooth?.message || (hostBluetooth?.enabled ? "已开启，手机可在“连接方式”里选择这台电脑" : "未开启");
+  $("link-route").textContent = hostBluetooth?.enabled ? "本地加密 · 局域网或蓝牙" : "本地加密传输";
+  $("open-workflows").hidden = !hostActions.has("openWorkflows");
+}
+for (const id of ["host-retry", "settings-retry"])
+  $(id).addEventListener("click", () => {
+    if (!nativeWindows) return;
+    nativePost({ type: "retry" });
+    toast("已开始重试");
+  });
+$("host-forget").addEventListener("click", async () => {
+  if (!hostActions.has("forget")) return;
+  if (
+    await confirmAction(
+      "结束重试？",
+      "这不会撤销电脑或手机上已经执行的操作。请先检查结果；结束后再次点按会发起一项新操作。",
+      "已检查，结束重试",
+    )
+  )
+    nativePost({ type: "forget" });
+});
+$("bluetooth-toggle").addEventListener("change", () => {
+  const toggle = $("bluetooth-toggle");
+  const wanted = toggle.checked;
+  if (toggle.hidden || !hostActions.has("bluetooth")) { toggle.checked = !wanted; return; }
+  toggle.disabled = true;
+  $("bluetooth-state").textContent = wanted ? "正在开启…" : "正在关闭…";
+  nativePost({ type: "bluetooth", enabled: wanted });
+  clearTimeout(bluetoothTimer);
+  bluetoothTimer = setTimeout(() => { toggle.disabled = false; renderHost(); }, 10000);
+});
+$("open-workflows").addEventListener("click", () => {
+  if (hostActions.has("openWorkflows")) nativePost({ type: "openWorkflows" });
+});
+
 if (nativeWindows) {
   window.chrome.webview.addEventListener('message', event => {
     const data = event.data;
-    if (data.type === 'error') toast(data.message, true);
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'error') {
+      setNativeSending(false);
+      clearTimeout(bluetoothTimer);
+      $("bluetooth-toggle").disabled = false;
+      renderHost();
+      toast(data.message, true);
+    }
     if (data.type === 'actionComplete') {
+      setNativeSending(false);
       if (data.text === $("message").value) $("message").value = '';
       toast('电脑已确认接收，结果可在记录中查看');
       refreshState().catch(() => {});
@@ -922,12 +1195,29 @@ if (nativeWindows) {
       $("upload-detail").textContent = '等待手机保存并校验后，记录会显示“手机已收取”。';
       refreshState().catch(() => {});
     }
-    if (data.type === 'queue' && data.pending) toast('有操作结果尚未确认，请点窗口顶部“重试确认”。', true);
+    if (data.type === 'queue') {
+      const wasPending = hostQueue.pending;
+      hostQueue = { pending: Boolean(data.pending), count: Number.isFinite(data.count) ? data.count : hostQueue.count };
+      if (data.pending) setNativeSending(false);
+      renderHost();
+      if (data.pending && !wasPending) toast('有操作结果尚未确认，可以在页面上方点“重试确认”。', true);
+    }
+    if (data.type === 'bluetooth') {
+      hostBluetooth = { message: String(data.message || ''), enabled: Boolean(data.enabled) };
+      clearTimeout(bluetoothTimer);
+      $("bluetooth-toggle").disabled = false;
+      renderHost();
+    }
+    if (data.type === 'host') {
+      hostActions = new Set(Array.isArray(data.actions) ? data.actions.filter(action => typeof action === 'string') : []);
+      renderHost();
+    }
   });
-  document.querySelector('.pairing-guide ol').innerHTML = '<li><strong>打开手机 NearBridge，点“扫码连接”</strong><p>手机和 Windows 电脑连接同一个 Wi-Fi。</p></li><li><strong>扫描此原生配对码</strong><p>证书和公钥随配对绑定，无需关闭证书验证。</p></li><li><strong>在电脑点击“允许配对”</strong><p>只确认你手边的手机，之后即可双向收发。</p></li>';
-  document.querySelector('.scope-note p').textContent = '鸿蒙端收发时请保持 NearBridge 前台运行。Windows 端关闭窗口后仍在托盘运行；电脑需保持唤醒。';
-  document.querySelector('.shortcut-builder h2').textContent = '接入 Windows 快捷方式';
-  document.querySelector('.builder-heading p').textContent = '从窗口顶部打开“快捷方式目录”，放入你选定的 .lnk，再载入并加入面板。手机只能触发已启用的 ID。';
+  document.querySelector('.pairing-guide ol').innerHTML = '<li><strong>打开手机 NearBridge，点“添加电脑”</strong><p>手机和这台电脑连接同一个 Wi‑Fi。手机里已添加的其他电脑会保留。</p></li><li><strong>扫描此原生配对码</strong><p>证书和公钥随配对绑定，无需关闭证书验证。</p></li><li><strong>在电脑点击“允许配对”</strong><p>只确认你手边的手机，之后即可双向收发。</p></li>';
+  $("scope-text").textContent = '鸿蒙端收发时请保持 NearBridge 前台运行。关闭窗口后 NearBridge 仍在托盘运行；电脑需保持唤醒。';
+  $("builder-title").textContent = '添加 Windows 快捷方式';
+  $("builder-description").textContent = '把你选定的 .lnk 快捷方式放进快捷方式目录，再载入并加入手机面板。手机只能触发已启用的项目。';
+  $("load-shortcuts").replaceChildren(icon("retry"), "载入快捷方式");
 }
 
 async function initialize() {
@@ -938,7 +1228,7 @@ async function initialize() {
     $("loading").hidden = true;
     if (role === "phone") {
       $("send-title").textContent = "发送到电脑";
-      $("recipient-kicker").textContent = "手机 → WINDOWS";
+      $("recipient-kicker").textContent = "手机 → 电脑";
       $("footer-detail").textContent = "收发时请保持页面打开。";
     }
     if (info.authenticated) await enterWorkspace();
@@ -955,7 +1245,7 @@ async function initialize() {
     $("loading").hidden = false;
     $("loading").textContent =
       `连接没有完成：${error.message}。请确认电脑上的 NearBridge 正在运行，然后刷新。`;
-    setConnection("未连接");
+    setConnection("未连接", false, true);
   }
 }
 initialize();

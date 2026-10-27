@@ -446,3 +446,163 @@ test("new native clients reject an old server before submitting actions", { skip
   await assert.rejects(f.client.sendText("hello"), /0.6/);
   assert.equal(f.requests.filter(r => r.options.method === "POST").length, 0);
 });
+
+const windowsQR = JSON.stringify({ ...JSON.parse(qr), name: 'Work PC', platform: 'windows' });
+function approvedPair(url) {
+  if (url.includes('/api/pair/status?')) return { status: 'approved', session: 'windows-session' };
+  if (url.endsWith('/api/pair')) return { id: 'pair-id', claim: 'claim' };
+  return { capabilities: { reliableActions: 1 }, items: [], workflows: [], jobs: [] };
+}
+
+test('adding Windows preserves the old Mac, its credentials, pending operation and queued/received files across restart', { skip }, async () => {
+  const f = fixture(approvedPair, true);
+  f.client.refresh = async () => {};
+  f.client.paired.platform = 'macos'; f.client.persistPair();
+  const macId = f.storage.get('activeComputerId');
+  const action = { requestId: randomUUID(), requestedAt: Date.now(), scope: f.client.paired.actionScope, kind: 'text', value: 'Mac only' };
+  f.client.saveAction(action);
+  const queue = [{ id: randomUUID(), uri: 'file://mac-only', name: 'mac.txt', size: 0, modified: 123 }];
+  f.client.sendJobs = queue; f.client.saveJobs();
+  const saved = [{ id: 'same-file-id', path: '/sandbox/nearbridge/received/mac.txt', sha256: 'mac-digest' }];
+  f.files.set('/sandbox/nearbridge/saved.json', JSON.stringify(saved));
+  await f.client.pair(windowsQR);
+  f.client.stop();
+  const windowsId = f.storage.get('activeComputerId');
+  const windowsDirectory = f.client.directory;
+  assert.notEqual(windowsId, macId);
+  const summaries = JSON.parse(f.storage.get('computersJSON'));
+  assert.deepEqual(summaries.map(p => p.platform).sort(), ['macos', 'windows']);
+  assert.ok(summaries.every(p => !('session' in p) && !('publicKeyHash' in p) && !('certificate' in p)));
+  assert.equal(f.storage.get('pendingAction'), '');
+  assert.equal(f.storage.get('outgoingCount'), 0);
+  assert.equal(f.storage.get('savedJSON'), '[]');
+  assert.equal(JSON.parse(f.files.get('/sandbox/nearbridge/paired.json')).session, 'test-session');
+  assert.equal(f.files.get('/sandbox/nearbridge/root.pem'), 'old-root');
+  assert.equal(JSON.parse(f.files.get('/sandbox/nearbridge/action.json'))[0].requestId, action.requestId);
+
+  const restarted = fixture(approvedPair, false, 0, f.files);
+  restarted.client.refresh = async () => {};
+  assert.equal(restarted.storage.get('activeComputerId'), windowsId);
+  assert.equal(restarted.client.paired.session, 'windows-session');
+  restarted.client.state = { capabilities: { reliableActions: 1 }, items: [], workflows: [], jobs: [] };
+  await restarted.client.sendText('Windows only');
+  const sent = restarted.requests.find(r => r.options.method === 'POST');
+  assert.equal(sent.options.header.Authorization, 'Bearer windows-session');
+  assert.equal(sent.options.caPath, `${windowsDirectory}/root.pem`);
+  await restarted.client.selectComputer(macId);
+  restarted.client.stop();
+  assert.equal(restarted.client.paired.session, 'test-session');
+  assert.equal(restarted.storage.get('computerPlatform'), 'macos');
+  assert.equal(restarted.storage.get('connectionMode'), 'bt');
+  assert.equal(restarted.client.pendingAction.requestId, action.requestId);
+  assert.equal(restarted.storage.get('outgoingCount'), 1);
+  assert.equal(restarted.client.savedPath('same-file-id'), saved[0].path);
+  assert.equal(JSON.parse(restarted.storage.get('stateJSON')).items.length, 0);
+  restarted.client.state = { capabilities: { reliableActions: 1 }, items: [], workflows: [], jobs: [] };
+  await restarted.client.retryPendingAction();
+  const replay = restarted.requests.filter(r => r.options.method === 'POST').at(-1);
+  assert.equal(replay.options.header.Authorization, 'Bearer test-session');
+  assert.equal(replay.options.certificatePinning.publicKeyHash, 'test-pin');
+  assert.equal(replay.options.caPath, '/sandbox/nearbridge/root.pem');
+  assert.equal(JSON.parse(replay.options.extraData).requestId, action.requestId);
+  restarted.client.stop();
+});
+
+test('re-pairing the same computer updates one entry, while failed pairing leaves both saved computers unchanged', { skip }, async () => {
+  let reject = false;
+  const f = fixture(async url => { if (reject) throw new Error('approval unavailable'); return approvedPair(url); });
+  f.client.refresh = async () => {};
+  await f.client.pair(windowsQR); f.client.stop();
+  const selected = f.storage.get('activeComputerId');
+  await f.client.pair(windowsQR); f.client.stop();
+  assert.equal(f.storage.get('activeComputerId'), selected);
+  assert.equal(JSON.parse(f.storage.get('computersJSON')).length, 2);
+  const before = f.files.get('/sandbox/nearbridge/computers.json');
+  reject = true;
+  await assert.rejects(f.client.pair(JSON.stringify({ ...JSON.parse(qr), publicKeyHash: 'B'.repeat(43) + '=' })), /approval unavailable/);
+  f.client.stop();
+  assert.equal(f.files.get('/sandbox/nearbridge/computers.json'), before);
+  assert.equal(f.client.paired.session, 'windows-session');
+});
+
+test('switching targets rejects active work and failed registry writes without changing live credentials', { skip }, async () => {
+  const f = fixture(approvedPair);
+  f.client.refresh = async () => {};
+  const macId = f.storage.get('activeComputerId');
+  await f.client.pair(windowsQR); f.client.stop();
+  const selected = f.storage.get('activeComputerId');
+  for (const key of ['sending', 'actionBusy', 'checkingBluetooth', 'pairingBusy']) {
+    f.client[key] = true;
+    await assert.rejects(f.client.selectComputer(macId), /完成或暂停/);
+    f.client[key] = false;
+  }
+  f.client.screenHolds = 1;
+  await assert.rejects(f.client.selectComputer(macId), /完成或暂停/);
+  f.client.screenHolds = 0;
+  const rename = f.fileIO.renameSync;
+  f.fileIO.renameSync = (from, to) => { if (to.endsWith('/computers.json')) throw new Error('disk full'); rename(from, to); };
+  await assert.rejects(f.client.selectComputer(macId), /disk full/);
+  assert.equal(f.storage.get('activeComputerId'), selected);
+  assert.equal(f.client.paired.session, 'windows-session');
+});
+
+test('switch cancels an old computer snapshot, and removing all profiles does not remigrate the legacy pairing', { skip }, async () => {
+  let hold = false;
+  const f = fixture(url => hold ? new Promise(() => {}) : approvedPair(url));
+  const macId = f.storage.get('activeComputerId');
+  f.client.refresh = async () => {};
+  await f.client.pair(windowsQR); f.client.stop();
+  const windowsId = f.storage.get('activeComputerId');
+  delete f.client.refresh;
+  hold = true;
+  const old = f.client.refresh();
+  await new Promise(resolve => setImmediate(resolve));
+  const rejected = assert.rejects(old, /destroyed|暂停/);
+  f.client.tick = async () => {};
+  await f.client.selectComputer(macId);
+  await rejected;
+  assert.equal(f.storage.get('macName'), 'Test Mac');
+  assert.equal(JSON.parse(f.storage.get('stateJSON')).items.length, 0);
+  await f.client.removeComputer(windowsId);
+  await f.client.removeComputer(macId);
+  f.client.stop();
+  assert.equal(f.storage.get('paired'), false);
+  assert.ok(f.files.has('/sandbox/nearbridge/paired.json'), 'forgetting does not delete retained files');
+  const restarted = fixture(approvedPair, false, 0, f.files);
+  assert.equal(restarted.storage.get('paired'), false);
+  assert.equal(restarted.storage.get('computersJSON'), '[]');
+});
+
+test('corrupt or traversal-bearing computer registries fail closed instead of remigrating or submitting credentials', { skip }, async () => {
+  const f = fixture(approvedPair);
+  const original = JSON.parse(f.files.get('/sandbox/nearbridge/computers.json'));
+  for (const bad of ['broken', JSON.stringify({ ...original, computers: [{ ...original.computers[0], id: '../../other' }] })]) {
+    const files = new Map(f.files);
+    files.set('/sandbox/nearbridge/computers.json', bad);
+    const restarted = fixture(approvedPair, false, 0, files);
+    assert.equal(restarted.storage.get('paired'), false);
+    await assert.rejects(restarted.client.pair(windowsQR), /电脑列表/);
+    await assert.rejects(restarted.client.sendText('must not send'), /电脑列表/);
+    assert.equal(restarted.requests.length, 0);
+  }
+});
+
+test('an idle share/foreground context follows a newly selected computer without sharing its old queue', { skip }, async () => {
+  const f = fixture(approvedPair);
+  f.client.refresh = async () => {};
+  const macId = f.storage.get('activeComputerId');
+  await f.client.pair(windowsQR); f.client.stop();
+  const windowsId = f.storage.get('activeComputerId');
+  const other = fixture(approvedPair, false, 0, f.files);
+  other.client.refresh = async () => {};
+  await f.client.selectComputer(macId); f.client.stop();
+  assert.equal(other.storage.get('activeComputerId'), windowsId);
+  other.client.syncComputerSelection();
+  assert.equal(other.storage.get('activeComputerId'), macId);
+  assert.equal(other.client.paired.session, 'test-session');
+  assert.equal(other.storage.get('outgoingCount'), 0);
+  assert.throws(() => other.client.ensureComputer(windowsId), /当前电脑已改变/,
+    'a paused share must not resume its remaining records to a newly selected computer');
+  assert.doesNotThrow(() => other.client.ensureComputer(macId));
+  assert.throws(() => other.client.ensureComputer(''), /当前电脑已改变/);
+});

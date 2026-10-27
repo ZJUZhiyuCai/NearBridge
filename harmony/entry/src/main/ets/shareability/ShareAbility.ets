@@ -6,6 +6,7 @@ import { ShareRecord } from '../core/Types';
 export default class ShareAbility extends ShareExtensionAbility {
   onSessionCreate(want: Want, session: UIExtensionContentSession): void {
     BridgeClient.shared.init(this.context);
+    BridgeClient.shared.syncComputerSelection();
     const storage = new LocalStorage();
     storage.setOrCreate('shareJSON', '[]');
     storage.setOrCreate('shareError', '');

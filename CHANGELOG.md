@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0 — 2026-10-27
+
+- Keep Windows and Mac as supported desktops with one HarmonyOS experience. The phone saves multiple computers, exposes an explicit active target, and separates credentials, Bluetooth settings, queued uploads, saved files and pending actions per computer.
+- Migrate the existing pairing in place. Switching cancels stale requests and clears the previous computer's UI state; active transfers and actions block target changes. Failed approvals preserve existing profiles and corrupt registries fail closed.
+- Add optional desktop platform metadata without changing historic role/source values or TLS/pairing behavior. Existing desktop versions fall back to a neutral computer label.
+- Integrate Claude's Windows workspace and phone device-picker design, including light/dark themes, consistent icons, native command placement and explicit share targets. Mac retains its SwiftUI client, menu bar and Shortcuts integration.
+
 ## 0.7.0 — 2026-10-27
 
 - Make Windows the primary desktop; retain HarmonyOS layouts, pairing/CA/pin verification, receipts, transfer limits, reliable operations and automatic LAN/BLE routing.

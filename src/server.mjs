@@ -73,6 +73,8 @@ export function createBridge(options) {
   } = options;
   if (!tls?.key || !tls?.cert) throw new Error("手机连接必须使用 TLS");
   const store = new Store(dataDir, inbox);
+  // The historic role/source value "mac" remains a wire-protocol identifier.
+  const platform = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "unknown";
   const clients = new Map();
   const waiters = new Map();
   const downloads = new Set();
@@ -166,6 +168,7 @@ export function createBridge(options) {
       revision: revision(),
       role,
       name,
+      platform,
       version: VERSION,
       capabilities: { reliableActions: 1 },
       paired: Boolean(currentDevice && currentDevice.expiresAt > Date.now()),
@@ -557,6 +560,7 @@ export function createBridge(options) {
         protocol: "nearbridge",
         version: 2,
         name,
+        platform,
         url: `https://${selected.ip}:${nativePort || remotePort}`,
         token: pairing.token,
         certificate: ca.raw.toString("base64"),

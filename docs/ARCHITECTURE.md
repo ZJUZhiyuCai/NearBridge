@@ -1,22 +1,23 @@
 # Architecture
 
-## Windows desktop (0.7)
+## Windows and Mac desktops (0.8)
 
-Windows is now the primary desktop. windows/BridgeWindow.cs hosts the existing local UI in WebView2 and supplies the tray, hotkey, pickers and per-user Send To IPC. windows/BridgeClient.cs owns durable action/upload journals; windows/BluetoothBridge.cs replaces CoreBluetooth with Windows GATT. Both transports reach the same Node service and phone TLS endpoint.
+Windows and Mac are both supported. windows/BridgeWindow.cs hosts the shared local UI in WebView2 and supplies the tray, hotkey, pickers and per-user Send To IPC. Its normal controls live in the web workspace; the native toolbar remains a load-failure fallback. windows/BridgeClient.cs owns durable action/upload journals; windows/BluetoothBridge.cs provides Windows GATT alongside the existing Mac CoreBluetooth relay. Both transports reach the same Node service and phone TLS endpoint.
 
 The mac role/source and /api/mac/* paths remain compatibility identifiers for either desktop. Windows uses fixed PowerShell source with JSON stdin, LocalAppData and locally resolved .lnk workflow IDs. src/discovery.mjs publishes _nearbridge._tcp on Windows; the Mac host retains its publisher. POSIX modes are not Windows ACL guarantees. The following original architecture and protocol flows also apply to Windows with these platform adapters.
 
-NearBridge has two native clients and one local service. All user data stays on the paired devices; no relay service is involved.
+The HarmonyOS client can retain up to eight computers and select one active target. Each desktop runs its own local service. All user data stays on the paired devices; no relay service is involved.
 
 ```mermaid
 flowchart LR
+  D[Windows WebView2 / tray] -->|loopback HTTP 53318| S
   M[Mac SwiftUI / AppKit] -->|loopback HTTP 53318| S[Node service]
   P[HarmonyOS ArkUI] -->|LAN HTTPS 53320| S
-  P -->|BLE GATT: encrypted TLS bytes| B[Mac CoreBluetooth relay]
+  P -->|BLE GATT: encrypted TLS bytes| B[Windows GATT or Mac CoreBluetooth]
   B -->|phone TLS endpoint only| S
   S --> I[Private state / transfer staging]
-  S --> F[Mac inbox]
-  S --> W[Enabled Mac workflows]
+  S --> F[Desktop inbox]
+  S --> W[Enabled desktop workflows]
 ```
 
 The web fallback uses HTTPS 53319. Only the Mac admin interface can approve pairing, enable workflows, read the clipboard, or open local files/links. The BLE relay cannot reach admin endpoints.
@@ -63,6 +64,10 @@ These operations support process-interruption recovery; full sudden-power-loss d
 
 ## Scope
 
-One Mac and one paired phone. Foreground phone operation. Automatic selection or explicit LAN-only/BLE-only mode. Mac remains awake. There is no cloud, Internet relay, Wi-Fi Direct/AWDL implementation, hidden background keepalive, or notification mirroring.
+Each desktop still pairs with one phone; the phone stores multiple computers and uses one at a time. Foreground phone operation. Automatic selection or explicit LAN-only/BLE-only mode is stored per computer. Computers remain awake. There is no cloud, Internet relay, Wi-Fi Direct/AWDL implementation, hidden background keepalive, or notification mirroring.
+
+The phone's atomic `computers.json` registry stores an active profile ID and non-session identity metadata. Each new computer has its own `computers/<UUID>/` directory for CA, session, Bluetooth settings, action journal, send queue and received files. The original pairing is registered in place as a legacy profile so saved paths and operation IDs survive migration. Switching cancels old requests, resets state/delta baselines, and loads only the selected profile. Busy transfers/actions reject switching. A corrupt registry fails closed rather than silently overwriting it or resurrecting a forgotten legacy pairing. Forgetting removes the selectable identity but retains downloaded files/journals; it does not undo remote actions or revoke the desktop session.
+
+State snapshots and native QR payloads include optional `platform` metadata (`windows`, `macos`, `unknown`). Old desktops/clients remain compatible; labels fall back to “电脑”. Platform names never select authentication rules or replace certificate pinning.
 
 See [protocol](PROTOCOL.md), [testing](TESTING.md), [security](../SECURITY.md), and [implementation notes](DESIGN.md).
