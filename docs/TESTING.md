@@ -1,5 +1,11 @@
 # Test matrix
 
+## Windows 0.7 coverage
+
+Run npm run build:windows before npm test. Windows CI does this automatically with .NET 10 and Node 24. Additional tests cover reserved filenames, shortcut ID allowlisting, literal PowerShell inputs, Windows DevEco discovery, atomic delta merging, the compiled C# BLE codec, bounded ZIP packaging and damaged journals. A fault-injecting HTTP fixture runs the compiled Windows client, drops action/chunk replies and verifies identical action IDs plus correct file offsets after client restart.
+
+Windows build and local service/client tests were run on 2026-10-27. The WebView2 window and controls loaded, but desktop input/capture access limited visual testing. DevEco Studio and a HarmonyOS phone were not available; no new signed HAP, real BLE throughput, Windows-to-phone transfer or hardware failure recovery is claimed. Earlier Mac device evidence below remains historical.
+
 Automated checks run against synthetic data in temporary directories. Hardware evidence is tracked separately so a passing CI run cannot be mistaken for phone validation.
 
 | Check | Command / environment | What it establishes |

@@ -1,5 +1,11 @@
 # Security policy
 
+## Windows 0.7
+
+Windows retains the loopback-only admin and authenticated phone TLS boundaries. WebView2 accepts host messages only from its own loopback root document, blocks external navigation/frames/popups, and accepts drag/drop paths only from browser-provided File objects. Fixed PowerShell operations receive JSON over stdin; phone text cannot become command source. Custom workflows resolve locally selected .lnk files by ID; removing a shortcut prevents later execution.
+
+Data defaults to the current user's LocalAppData. POSIX modes do not set Windows ACLs; retain normal private user-profile ACLs, especially when overriding data paths. Clipboard access is explicit unless incoming-text copying was enabled. Builds are not commercially signed. Bluetooth requires peripheral-role driver support and relays only to the phone TLS port. Folder staging rejects reparse points and bounds content size.
+
 NearBridge is experimental local software. Security fixes target the latest source version; older private builds are not maintained as separate release branches.
 
 ## Reporting

@@ -1,5 +1,7 @@
 # Protocol contracts
 
+Since 0.7, Windows is the primary desktop. Existing mac role/source values and /api/mac/* endpoints mean the trusted desktop, including Windows; they remain unchanged for stored records and older clients. BLE UUIDs, frames, CA/pin verification and receipts are unchanged. The native pairing endpoint accepts an optional ip query selecting a current local address. /api/mac/reveal-file accepts only a stored file ID and opens its parent directory; phone callers cannot use it.
+
 This documents the current local protocol, not a stable third-party API. Keep old `/api/state` clients working when adding fields.
 
 ## Endpoints and identity

@@ -14,20 +14,28 @@ export function prepareHarmonyProject() {
   }
 }
 
-export function harmonyToolchain() {
-  const app = [process.env.NEARBRIDGE_DEVECO_APP, '/Applications/DevEco-Studio.app',
-    resolve(homedir(), 'Applications/DevEco-Studio.app')]
-    .filter(Boolean).find(path => existsSync(resolve(path, 'Contents/tools/hvigor/bin/hvigorw.js')));
+export function harmonyToolchain({ platform = process.platform, env = process.env, home = homedir() } = {}) {
+  const windows = platform === 'win32';
+  const app = [env.NEARBRIDGE_DEVECO_APP,
+    ...(windows ? [
+      resolve(env.ProgramFiles || 'C:/Program Files', 'Huawei/DevEco Studio'),
+      resolve(env.LOCALAPPDATA || resolve(home, 'AppData/Local'), 'Programs/Huawei/DevEco Studio'),
+      'C:/Huawei/DevEco Studio', 'D:/Huawei/DevEco Studio',
+    ] : ['/Applications/DevEco-Studio.app', resolve(home, 'Applications/DevEco-Studio.app')])]
+    .filter(Boolean).find(path => existsSync(resolve(path, windows ? 'tools/hvigor/bin/hvigorw.js' : 'Contents/tools/hvigor/bin/hvigorw.js')));
   if (!app) throw new Error('请先安装华为官方 DevEco Studio，或设置 NEARBRIDGE_DEVECO_APP 为应用路径。');
-  const contents = resolve(app, 'Contents');
+  const contents = windows ? resolve(app) : resolve(app, 'Contents');
   const nodeHome = resolve(contents, 'tools/node');
+  const node = [resolve(nodeHome, windows ? 'node.exe' : 'bin/node'), resolve(nodeHome, 'bin/node.exe')].find(existsSync);
+  if (!node) throw new Error('DevEco Studio 内置 Node.js 不存在，请检查 NEARBRIDGE_DEVECO_APP。');
+  const pathKey = Object.keys(env).find(key => key.toUpperCase() === 'PATH') || 'PATH';
   return {
     contents,
-    node: resolve(nodeHome, 'bin/node'),
-    env: { ...process.env, NODE_HOME: nodeHome,
+    node,
+    env: { ...env, NODE_HOME: nodeHome,
       DEVECO_CLI_STUDIO_PATH: app, DEVECO_CLI_DISABLE_TELEMETRY: '1',
-      DEVECO_SDK_HOME: resolve(contents, 'sdk'),
-      JAVA_HOME: resolve(contents, 'jbr/Contents/Home'),
-      PATH: [resolve(nodeHome, 'bin'), resolve(contents, 'tools/ohpm/bin'), process.env.PATH || ''].join(delimiter) },
+      DEVECO_SDK_HOME: env.DEVECO_SDK_HOME || resolve(contents, 'sdk'),
+      JAVA_HOME: resolve(contents, windows ? 'jbr' : 'jbr/Contents/Home'),
+      [pathKey]: [nodeHome, resolve(nodeHome, 'bin'), resolve(contents, 'tools/ohpm/bin'), env[pathKey] || ''].join(windows ? ';' : delimiter) },
   };
 }

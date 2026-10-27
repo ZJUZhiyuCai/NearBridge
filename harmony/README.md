@@ -1,6 +1,16 @@
 # NearBridge · HarmonyOS 原生端
 
-目标设备：Mate 70 Pro+，最低兼容 HarmonyOS 6 / API 20。此目录为 Stage 模型 ArkTS 工程，含主 UIAbility 和系统 ShareExtensionAbility。当前源码为 **0.5.0 / 500**；新版真机回归仍待进行。2026-10-26 安装并通过扫码、工作流、自动收件、图库分享和 BLE 小文件验证的是 **0.2 基线**，不能视作 0.5 已验收。
+## Windows 开发与配对（0.7）
+
+当前源码为 **0.7.0 / 700**，主要连接 Windows；布局、协议和包名保持不变。系统分享入口改为“发送到电脑”。旧 Mac 真机记录不能视作 Windows 已验收。
+
+安装 Windows 版官方 DevEco Studio，脚本默认检查 C:\Program Files\Huawei\DevEco Studio 等目录。自定义安装位置可在 PowerShell 设置 NEARBRIDGE_DEVECO_APP，然后运行 npm run build:phone。SDK 在其他目录时可设置 DEVECO_SDK_HOME。脚本读取 tools/node/node.exe、Hvigor、jbr 和 sdk，已有签名配置不会覆盖。签名仍由自己的华为账号和设备授权完成。
+
+Windows 进入“设备连接”，手机扫原生二维码，再在电脑允许。自动/仅蓝牙/仅局域网及可靠操作逻辑不变；Windows 蓝牙从窗口顶部开启，附近列表可能显示 Windows 系统设备名。
+
+本次 Windows 环境未安装 DevEco Studio，未生成新签名 HAP，也未完成 Windows ↔ 鸿蒙真机回归。以下 Mac 说明与验证记录作为历史保留；Windows 使用以 [Windows 说明](../windows/README.md) 为准。
+
+目标设备：Mate 70 Pro+，最低兼容 HarmonyOS 6 / API 20。此目录为 Stage 模型 ArkTS 工程，含主 UIAbility 和系统 ShareExtensionAbility。当时源码为 **0.5.0 / 500**；新版真机回归仍待进行。2026-10-26 安装并通过扫码、工作流、自动收件、图库分享和 BLE 小文件验证的是 **0.2 基线**，不能视作 0.5 已验收。
 
 ## 打开与构建
 

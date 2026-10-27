@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 — 2026-10-27
+
+- Make Windows the primary desktop; retain HarmonyOS layouts, pairing/CA/pin verification, receipts, transfer limits, reliable operations and automatic LAN/BLE routing.
+- Add a .NET 10 WinForms/WebView2 tray host, Ctrl+Alt+Space, Explorer Send To, drag/drop, bounded ZIP packaging, durable upload queues and action journals. Lost responses reuse their ID after restart.
+- Implement the existing BLE UUIDs/TLS framing with Windows GATT, MTU limits, serialized indications and four bounded streams. Detect peripheral-role support; Windows-to-phone hardware acceptance remains outstanding.
+- Adapt clipboard/Explorer/allowlisted .lnk workflows, OpenSSL discovery, LocalAppData, Windows filenames and cross-volume inbox copies. Publish Windows mDNS.
+- Support Windows DevEco paths, add Windows CI and compiled-client tests, and keep existing macOS sources and historical evidence.
+- Local validation covers Windows builds and service/client regressions. No DevEco SDK/signing or phone was available. WebView2 window/controls were observed; desktop access errors limited visual interaction.
+
 ## 0.6.0 — 2026-10-26
 
 - Reconnect directly to the remembered BLE device; scan only on failure and stop early when the selected device is found. Cancel pending GATT work immediately, isolate late callbacks and apply bounded retry/backoff.

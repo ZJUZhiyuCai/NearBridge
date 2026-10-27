@@ -1,5 +1,7 @@
 # Contributing
 
+Windows is the primary desktop in 0.7; existing Mac sources remain. Use .NET 10 SDK, Git for Windows/OpenSSL and WebView2. Run npm run build:windows before npm test to include compiled-client tests. npm run install:windows optionally installs for the current user and adds Explorer Send To. Shared phone build scripts now support Windows DevEco layouts. See [Windows setup](windows/README.md).
+
 NearBridge connects a Mac and a HarmonyOS phone using native interfaces and local transports. Small, reproducible changes are easier to review than broad rewrites.
 
 ## Development

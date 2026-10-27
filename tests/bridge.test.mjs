@@ -1405,3 +1405,28 @@ test("reliable workflows return the same accepted job and enforce target binding
   assert.equal(state.capabilities.reliableActions, 1);
   assert.equal(state.actionReceipts, undefined, "receipt ledger is not part of the public history feed");
 });
+
+test("desktop file reveal resolves stored IDs and never accepts a phone-supplied path", async t => {
+  const { request, pair, clipboard, config } = await fixture(t);
+  const cookie = await pair();
+  const upload = await request("phone", "/api/files", { cookie, method: "POST", raw: Buffer.from("safe"),
+    headers: { "X-File-Name": encodeURIComponent("手机文件.txt"), "X-File-Size": "4" } });
+  assert.equal(upload.status, 201);
+  const body = { id: upload.json.item.id };
+  assert.equal((await request("phone", "/api/mac/reveal-file", { cookie, method: "POST", body })).status, 403);
+  assert.equal((await request("mac", "/api/mac/reveal-file", { method: "POST", body: { id: "../arbitrary" } })).status, 404);
+  assert.deepEqual(clipboard.opened, []);
+  assert.equal((await request("mac", "/api/mac/reveal-file", { method: "POST", body })).status, 200);
+  assert.deepEqual(clipboard.opened, [config.inbox]);
+});
+
+test("native desktop pairing can select a reachable address on a multihomed Windows host", async t => {
+  const addresses = [{ name: "virtual", ip: "192.168.50.1" }, { name: "Wi-Fi", ip: "192.168.20.5" }];
+  const { request, pair, info } = await fixture(t, { addresses });
+  const cookie = await pair();
+  const native = await request("mac", "/api/pairing/native?ip=192.168.20.5", { method: "POST", body: {} });
+  assert.equal(native.status, 200);
+  assert.equal(native.json.url, `https://192.168.20.5:${info.nativePort || info.phonePort}`);
+  assert.match(native.json.qr, /^data:image\/png;base64,/);
+  assert.equal((await request("phone", "/api/pairing/native", { cookie, method: "POST", body: {} })).status, 403);
+});

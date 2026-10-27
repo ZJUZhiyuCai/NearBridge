@@ -133,7 +133,7 @@ test("a committed file leaves the outgoing queue even if the receipt refresh is 
   });
   await assert.doesNotReject(() => f.client.sendFile("file://test-empty", "test-empty.bin"));
   assert.equal(f.storage.get("outgoingCount"), 0);
-  assert.equal(f.storage.get("progress"), "test-empty.bin 已存入 Mac");
+  assert.equal(f.storage.get("progress"), "test-empty.bin 已存入电脑");
   assert.equal(f.storage.get("progressFraction"), -1);
   assert.equal(f.storage.get("transferPhase"), "completed");
   assert.equal(f.requests.filter((request) => request.url.endsWith("/complete")).length, 1);
