@@ -1,6 +1,6 @@
 # NearBridge
 
-![NearBridge：让设备，靠近一点。Mac、Windows 与 HarmonyOS 之间的文件互传、一键工作流和多电脑切换。](docs/media/nearbridge-hero.png)
+[![NearBridge：让设备，靠近一点。Mac、Windows 与 HarmonyOS 之间的文件互传、手机工作流与多电脑配对。Star on GitHub。](docs/media/nearbridge-hero-star.png)](https://github.com/ZJUZhiyuCai/NearBridge)
 
 **把文件直接传过去，把电脑常用动作放进手机。**
 
@@ -154,8 +154,10 @@ CI 覆盖 Windows .NET 构建与原生测试、Linux Node 22/24/26，以及 macO
 
 ## 宣传素材
 
-[查看 / 下载竖版海报](docs/media/nearbridge-poster-0.8.png) · [全部素材与来源说明](docs/media/README.md)
+[查看 / 下载 Star 宣传海报](docs/media/nearbridge-poster-star.png) · [全部素材与来源说明](docs/media/README.md)
 
-<a href="docs/media/nearbridge-poster-0.8.png"><img src="docs/media/nearbridge-poster-0.8.png" width="360" alt="NearBridge 0.8 宣传海报：你的手机，也是电脑的快捷键。支持 Mac、Windows、HarmonyOS，文件、文字和工作流；蓝牙为实验通道。"></a>
+你的设备，不必同一家。如果 NearBridge 对你有用，欢迎到 [GitHub 项目页](https://github.com/ZJUZhiyuCai/NearBridge) 点一颗 **Star**，也欢迎反馈和贡献。
+
+<a href="docs/media/nearbridge-poster-star.png"><img src="docs/media/nearbridge-poster-star.png" width="360" alt="NearBridge Star 宣传海报：你的设备，不必同一家。鸿蒙手机连接 Mac 与 Windows，扫码访问 GitHub 项目，为项目点一颗 Star。"></a>
 
 源码与仓库内自制宣传素材采用 [MIT](LICENSE)。第三方依赖、Microsoft WebView2 与华为 SDK 按各自许可使用；平台名称仅用于说明兼容性。
