@@ -1,10 +1,13 @@
 export interface PairingPayload {
-  protocol: string; version: number; name: string; url: string;
+  protocol: string; version: number; name: string; url: string; platform?: string;
   token: string; certificate: string; publicKeyHash: string;
 }
 export interface PairedMac {
-  actionScope?: string; name: string; url: string; session: string; certificate: string; publicKeyHash: string;
+  actionScope?: string; name: string; url: string; session: string; certificate: string; publicKeyHash: string; platform?: string;
 }
+export interface ComputerSummary { id: string; name: string; platform: string; }
+export interface ComputerProfile extends ComputerSummary { publicKeyHash: string; legacy?: boolean; }
+export interface ComputerRegistry { version: number; activeId: string; computers: ComputerProfile[]; }
 export interface BridgeItem {
   id: string; kind: string; source: string; createdAt: string;
   name?: string; text?: string; size?: number; sha256?: string; receivedAt?: string;
@@ -13,7 +16,7 @@ export interface Workflow { id: string; name: string; description: string; enabl
 export interface Job { id: string; name: string; status: string; message: string; }
 export interface Capabilities { reliableActions: number; }
 export interface PendingAction { requestId: string; requestedAt: number; scope: string; kind: string; value: string; }
-export interface BridgeState { capabilities?: Capabilities; revision?: string; name: string; items: BridgeItem[]; workflows: Workflow[]; jobs: Job[]; }
+export interface BridgeState { platform?: string; capabilities?: Capabilities; revision?: string; name: string; items: BridgeItem[]; workflows: Workflow[]; jobs: Job[]; }
 export interface StateDelta { baseRevision: string; state: BridgeState; removed: string[]; order?: string[]; }
 export interface StateUpdate { revision: string; state?: BridgeState; delta?: StateDelta; }
 export interface PairClaim { id: string; claim: string; }

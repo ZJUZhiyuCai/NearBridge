@@ -8,6 +8,8 @@ Data defaults to the current user's LocalAppData. POSIX modes do not set Windows
 
 NearBridge is experimental local software. Security fixes target the latest source version; older private builds are not maintained as separate release branches.
 
+In 0.8, the phone stores each computer's credentials, CA, pinned key, Bluetooth settings and pending work in its own profile. Switching cancels old requests and does not replay another profile's operation IDs or uploads. Platform labels and device names never authenticate a computer. The selectable summary excludes sessions and certificates. A corrupt registry fails closed. Removing a computer from the phone list retains downloaded files/journals and does not revoke the desktop-side session; revocation remains an explicit action on that computer.
+
 ## Reporting
 
 Use **Security → Report a vulnerability** if the repository offers that private reporting entry. Otherwise, contact [@ZJUZhiyuCai](https://github.com/ZJUZhiyuCai) through an existing private collaboration channel. Do not put exploitable details, pairing QR codes, tokens, private certificates, device IDs, or personal files in a public issue.

@@ -162,6 +162,18 @@ test("adversarial: Unicode filenames fit filesystem byte limits and preserve ext
   assert.notEqual(results[0], results[1]);
 });
 
+test('desktop platform is explicit metadata while historic desktop roles remain compatible', async t => {
+  const { request, pair } = await fixture(t);
+  const expected = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'unknown';
+  const desktop = (await request('mac', '/api/state')).json;
+  assert.equal(desktop.role, 'mac');
+  assert.equal(desktop.platform, expected);
+  const cookie = await pair();
+  const phone = (await request('phone', '/api/state', { cookie })).json;
+  assert.equal(phone.platform, expected);
+  assert.equal(phone.role, 'phone');
+});
+
 test("changes: notifications wake immediately, idle replies omit history, stale revisions cannot miss changes", async (t) => {
   const { request, pair } = await fixture(t);
   const cookie = await pair();

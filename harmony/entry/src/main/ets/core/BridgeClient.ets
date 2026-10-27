@@ -4,7 +4,7 @@ import { fileIo as fs, fileUri, hash } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { window } from '@kit.ArkUI';
 import { BluetoothTunnel, BluetoothSettings, BLUETOOTH_URL } from './BluetoothTunnel';
-import { BridgeState, StateUpdate, BridgeItem, PairedMac, PairingPayload, PairClaim, PairStatus, TransferReply, SavedFile, SendJob, ErrorReply, PendingAction } from './Types';
+import { BridgeState, StateUpdate, BridgeItem, PairedMac, PairingPayload, PairClaim, PairStatus, TransferReply, SavedFile, SendJob, ErrorReply, PendingAction, ComputerSummary, ComputerProfile, ComputerRegistry } from './Types';
 
 const CHUNK = 4 * 1024 * 1024;
 const PRIVATE_URL = /^https:\/\/(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}):\d{1,5}$/;
@@ -18,6 +18,11 @@ export class BridgeClient {
   static shared: BridgeClient = new BridgeClient();
   private context?: common.Context;
   private directory: string = '';
+  private baseDirectory: string = '';
+  private computers: ComputerProfile[] = [];
+  private activeComputerId: string = '';
+  private computerStorageError: string = '';
+  private pairingBusy: boolean = false;
   private paired?: PairedMac;
   private saved: SavedFile[] = [];
   private sendJobs: SendJob[] = [];
@@ -51,11 +56,81 @@ export class BridgeClient {
   private bluetooth: BluetoothSettings = { enabled: false, id: '', name: '' };
 
   init(context: common.Context): void {
-    if (this.directory !== '') return;
+    if (this.baseDirectory !== '') return;
     this.context = context;
-    this.directory = `${context.filesDir}/nearbridge`;
+    this.baseDirectory = `${context.filesDir}/nearbridge`;
+    if (!fs.accessSync(this.baseDirectory)) fs.mkdirSync(this.baseDirectory);
+    this.loadRegistry();
+    this.loadCurrentComputer();
+  }
+  private platform(value?: string): string { return value === 'windows' || value === 'macos' ? value : 'unknown'; }
+  private profileDirectory(profile: ComputerProfile): string {
+    return profile.legacy ? this.baseDirectory : `${this.baseDirectory}/computers/${profile.id}`;
+  }
+  private loadRegistry(): void {
+    this.computerStorageError = '';
+    const path = `${this.baseDirectory}/computers.json`;
+    try {
+      if (fs.accessSync(path)) {
+        const registry = JSON.parse(fs.readTextSync(path)) as ComputerRegistry;
+        if (registry.version !== 1 || !Array.isArray(registry.computers) || registry.computers.length > 8 ||
+          typeof registry.activeId !== 'string') throw new Error('电脑列表无效');
+        const ids: Set<string> = new Set();
+        const pins: Set<string> = new Set();
+        let legacy = 0;
+        for (const profile of registry.computers) {
+          if (!/^[a-zA-Z0-9-]{16,80}$/.test(profile.id) || ids.has(profile.id) || typeof profile.name !== 'string' ||
+            !profile.name || profile.name.length > 120 || typeof profile.publicKeyHash !== 'string' || !profile.publicKeyHash ||
+            pins.has(profile.publicKeyHash) || (profile.legacy !== undefined && typeof profile.legacy !== 'boolean')) throw new Error('电脑列表无效');
+          ids.add(profile.id); pins.add(profile.publicKeyHash); profile.platform = this.platform(profile.platform);
+          if (profile.legacy) legacy++;
+        }
+        if (legacy > 1 || (registry.computers.length ? !ids.has(registry.activeId) : registry.activeId !== '')) throw new Error('当前电脑记录无效');
+        this.computers = registry.computers; this.activeComputerId = registry.activeId;
+      } else {
+        // Keep the original directory in place: existing received files and
+        // pending operation IDs retain their paths, even if migration is retried.
+        const oldPath = `${this.baseDirectory}/paired.json`;
+        if (fs.accessSync(oldPath)) {
+          const pair = JSON.parse(fs.readTextSync(oldPath)) as PairedMac;
+          if (!pair.session || !pair.publicKeyHash || !pair.name) throw new Error('原配对记录无效');
+          const profile: ComputerProfile = { id: util.generateRandomUUID(true), name: pair.name,
+            platform: this.platform(pair.platform), publicKeyHash: pair.publicKeyHash, legacy: true };
+          this.saveRegistry([profile], profile.id);
+          this.computers = [profile]; this.activeComputerId = profile.id;
+        }
+      }
+    } catch (_) {
+      // Do not silently remigrate a deleted or corrupt registry and resurrect a
+      // forgotten computer, or overwrite private files with a new identity.
+      this.computers = []; this.activeComputerId = '';
+      this.computerStorageError = '无法读取已保存的电脑列表，请保留应用数据并修复存储后重试';
+    }
+  }
+  private saveRegistry(computers: ComputerProfile[], activeId: string): void {
+    const registry: ComputerRegistry = { version: 1, computers: computers, activeId: activeId };
+    this.writeAt(this.baseDirectory, 'computers.json', JSON.stringify(registry));
+  }
+  private publishComputers(): void {
+    const summaries: ComputerSummary[] = this.computers.map((profile: ComputerProfile): ComputerSummary =>
+      ({ id: profile.id, name: profile.name, platform: profile.platform }));
+    AppStorage.setOrCreate('computersJSON', JSON.stringify(summaries));
+    AppStorage.setOrCreate('activeComputerId', this.activeComputerId);
+    AppStorage.setOrCreate('computerPlatform', this.platform(this.paired?.platform));
+  }
+  private loadCurrentComputer(): void {
+    const profile = this.computers.find((value: ComputerProfile) => value.id === this.activeComputerId);
+    this.directory = profile ? this.profileDirectory(profile) : `${this.baseDirectory}/unpaired`;
+    if (profile && !profile.legacy && !fs.accessSync(`${this.baseDirectory}/computers`)) fs.mkdirSync(`${this.baseDirectory}/computers`);
     if (!fs.accessSync(this.directory)) fs.mkdirSync(this.directory);
-    try { this.paired = JSON.parse(fs.readTextSync(`${this.directory}/paired.json`)) as PairedMac; } catch (_) {}
+    this.paired = undefined; this.saved = []; this.sendJobs = []; this.pendingAction = undefined; this.actionStorageError = '';
+    this.state = undefined; this.sessionRejected = false; this.lastDiscovery = 0; this.lastRouteProbe = 0;
+    this.bluetooth = { enabled: false, id: '', name: '', transport: 'ble-v1', mode: 'auto' };
+    let profileError = '';
+    if (profile) {
+      try { this.paired = this.readPaired(profile); }
+      catch (_) { profileError = '这台电脑的配对记录不完整，请重新扫码添加；其他电脑仍可选择'; }
+    }
     if (this.paired && !this.paired.actionScope) {
       this.paired.actionScope = util.generateRandomUUID(true); this.persistPair();
     }
@@ -102,9 +177,16 @@ export class BridgeClient {
     let autoReceive = true;
     try { autoReceive = fs.readTextSync(`${this.directory}/auto-receive`) !== 'false'; } catch (_) {}
     AppStorage.setOrCreate('autoReceive', autoReceive);
+    this.publishComputers();
+    if (this.computerStorageError || profileError) {
+      AppStorage.setOrCreate('status', this.computerStorageError || profileError); AppStorage.setOrCreate('linkPhase', 'error');
+    }
   }
   private write(name: string, contents: string): void {
-    const temp = `${this.directory}/${name}.tmp`;
+    this.writeAt(this.directory, name, contents);
+  }
+  private writeAt(directory: string, name: string, contents: string): void {
+    const temp = `${directory}/${name}.tmp`;
     const file = fs.openSync(temp, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
     try {
       const bytes = new util.TextEncoder().encodeInto(contents);
@@ -116,12 +198,61 @@ export class BridgeClient {
       }
       fs.fsyncSync(file.fd);
     } finally { fs.closeSync(file); }
-    fs.renameSync(temp, `${this.directory}/${name}`);
+    fs.renameSync(temp, `${directory}/${name}`);
   }
   private persistPair(): void {
     if (this.paired) this.write('paired.json', JSON.stringify(this.paired));
     AppStorage.setOrCreate('paired', this.paired !== undefined && this.paired.session !== '');
     AppStorage.setOrCreate('macName', this.paired?.name || '我的电脑');
+    if (!this.pairingBusy && this.paired) {
+      const current = this.computers.find((profile: ComputerProfile) => profile.id === this.activeComputerId);
+      if (current && (current.name !== this.paired.name || current.platform !== this.platform(this.paired.platform))) {
+        const next: ComputerProfile = { id: current.id, name: this.paired.name, platform: this.platform(this.paired.platform),
+          publicKeyHash: current.publicKeyHash, legacy: current.legacy };
+        const profiles = this.computers.map((profile: ComputerProfile) => profile.id === current.id ? next : profile);
+        this.saveRegistry(profiles, this.activeComputerId); this.computers = profiles;
+      }
+      this.publishComputers();
+    }
+  }
+  private assertComputerChange(): void {
+    if (this.computerStorageError) throw new Error(this.computerStorageError);
+    if (this.pairingBusy || this.actionBusy || this.sending || this.checkingBluetooth || this.receiving.size || this.screenHolds > 0)
+      throw new Error('正在配对、传输或确认操作，请完成或暂停后再切换电脑');
+  }
+  private readPaired(profile: ComputerProfile): PairedMac {
+    const directory = this.profileDirectory(profile);
+    const pair = JSON.parse(fs.readTextSync(`${directory}/paired.json`)) as PairedMac;
+    if (typeof pair.session !== 'string' || !pair.session || typeof pair.name !== 'string' || !pair.name || pair.name.length > 120 ||
+      pair.publicKeyHash !== profile.publicKeyHash || !PRIVATE_URL.test(pair.url) ||
+      typeof pair.certificate !== 'string' || !pair.certificate || !fs.accessSync(`${directory}/root.pem`))
+      throw new Error('这台电脑的配对记录已损坏，请重新扫码添加');
+    return pair;
+  }
+  async selectComputer(id: string): Promise<void> {
+    this.assertComputerChange();
+    if (id === this.activeComputerId) return;
+    const profile = this.computers.find((value: ComputerProfile) => value.id === id);
+    if (!profile) throw new Error('电脑已不在保存列表中，请重新扫码添加');
+    this.readPaired(profile);
+    // Commit the pointer before changing any live state. A failed write leaves
+    // the old target, its queue and its credentials untouched.
+    this.saveRegistry(this.computers, id);
+    this.stop(); this.activeComputerId = id;
+    this.loadCurrentComputer(); BluetoothTunnel.shared.retry(); this.start();
+  }
+  async removeComputer(id: string): Promise<void> {
+    this.assertComputerChange();
+    if (!this.computers.some((profile: ComputerProfile) => profile.id === id)) throw new Error('电脑已不在保存列表中');
+    const profiles = this.computers.filter((profile: ComputerProfile) => profile.id !== id);
+    const activeId = id === this.activeComputerId ? (profiles[0]?.id || '') : this.activeComputerId;
+    this.saveRegistry(profiles, activeId);
+    this.computers = profiles;
+    if (id === this.activeComputerId) {
+      this.stop(); this.activeComputerId = activeId; this.loadCurrentComputer(); this.start();
+    } else this.publishComputers();
+    // Deliberately retain downloaded files and pending journals on disk. Forget
+    // removes the selectable identity; it never deletes files or undoes actions.
   }
   private async request(route: string, method: http.RequestMethod = http.RequestMethod.GET, body?: string | ArrayBuffer,
     extraHeaders: Record<string, string> = {}, origin: string = '', anonymous: boolean = false): Promise<http.HttpResponse> {
@@ -183,42 +314,67 @@ export class BridgeClient {
     return JSON.parse(this.decode(response)) as T;
   }
   async pair(raw: string): Promise<void> {
+    this.assertComputerChange();
     if (raw.length > 8000) throw new Error('二维码内容无效');
     const data = JSON.parse(raw) as PairingPayload;
-    if (data.protocol !== 'nearbridge' || data.version !== 2 || !PRIVATE_URL.test(data.url) ||
+    if (data.protocol !== 'nearbridge' || data.version !== 2 || typeof data.name !== 'string' || !data.name.trim() || data.name.length > 120 || !PRIVATE_URL.test(data.url) ||
       !/^[A-Za-z0-9_-]{43}$/.test(data.token) || !/^[A-Za-z0-9+/]{43}=$/.test(data.publicKeyHash) ||
       !/^[A-Za-z0-9+/=]{300,6000}$/.test(data.certificate)) throw new Error('请扫描电脑原生窗口中的配对码');
-    const previous = this.paired;
-    const previousBluetooth = this.bluetooth;
-    const previousMode = this.connectionMode;
-    let previousRoot = '';
-    try { previousRoot = fs.readTextSync(`${this.directory}/root.pem`); } catch (_) {}
+    const existing = this.computers.find((profile: ComputerProfile) => profile.publicKeyHash === data.publicKeyHash);
+    if (!existing && this.computers.length >= 8) throw new Error('最多保存 8 台电脑，请先移除不再使用的电脑');
+    const candidate: ComputerProfile = { id: existing?.id || util.generateRandomUUID(true), name: data.name,
+      platform: this.platform(data.platform || existing?.platform), publicKeyHash: data.publicKeyHash, legacy: existing?.legacy };
+    const previousId = this.activeComputerId;
+    const candidateDirectory = this.profileDirectory(candidate);
+    if (!fs.accessSync(candidateDirectory)) {
+      const parent = `${this.baseDirectory}/computers`;
+      if (!fs.accessSync(parent)) fs.mkdirSync(parent);
+      fs.mkdirSync(candidateDirectory);
+    }
+    const oldPair = this.readOptional(candidateDirectory, 'paired.json');
+    const oldRoot = this.readOptional(candidateDirectory, 'root.pem');
+    const oldBluetooth = this.readOptional(candidateDirectory, 'bluetooth.json');
+    this.pairingBusy = true;
     this.stop();
-    // A QR code identifies the new 电脑's LAN endpoint. An old BLE selection
-    // belongs to the previous pairing and must not intercept this handshake.
+    const epoch = this.connectionEpoch;
+    let committed = false;
+    this.directory = candidateDirectory;
+    // QR approval always uses the scanned computer's own root and LAN endpoint.
     this.bluetooth = { enabled: false, id: '', name: '', transport: 'ble-v1' };
     this.connectionMode = 'lan'; this.state = undefined;
-    this.paired = { actionScope: util.generateRandomUUID(true), name: data.name, url: data.url, session: '', certificate: data.certificate, publicKeyHash: data.publicKeyHash };
+    this.paired = { actionScope: util.generateRandomUUID(true), name: data.name, url: data.url, session: '', certificate: data.certificate, publicKeyHash: data.publicKeyHash, platform: candidate.platform };
     const lines = data.certificate.match(/.{1,64}/g) || [];
-    this.write('root.pem', `-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----\n`);
-    AppStorage.setOrCreate('status', '请在电脑确认配对请求');
+    AppStorage.setOrCreate('stateJSON', '{"name":"","items":[],"workflows":[],"jobs":[]}');
+    AppStorage.setOrCreate('useBluetooth', false);
+    AppStorage.setOrCreate('connectionMode', 'lan');
+    AppStorage.setOrCreate('status', `请在 ${data.name} 确认配对请求`);
     AppStorage.setOrCreate('linkPhase', 'waitingApproval');
     try {
+      this.write('root.pem', `-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----\n`);
       const claim = await this.json<PairClaim>('/api/pair', http.RequestMethod.POST,
         JSON.stringify({ token: data.token, name: 'Mate 70 Pro+', client: 'harmony-native' }));
       const deadline = Date.now() + 5 * 60000;
       while (Date.now() < deadline) {
+        if (epoch !== this.connectionEpoch) throw new Error('配对已暂停，请返回应用后重新扫码');
         const result = await this.json<PairStatus>(`/api/pair/status?id=${claim.id}`, http.RequestMethod.GET, '', { 'X-Pair-Claim': claim.claim });
         if (result.status === 'rejected') throw new Error('电脑拒绝了本次配对');
         if (result.status === 'approved' && result.session) {
           this.paired.session = result.session;
           this.sessionRejected = false; this.connectionMode = 'auto'; this.bluetooth.mode = 'auto';
           this.persistPair();
-          this.publishPendingAction();
-          AppStorage.setOrCreate('connectionMode', 'auto');
           this.write('bluetooth.json', JSON.stringify(this.bluetooth));
-          AppStorage.setOrCreate('useBluetooth', false);
-          AppStorage.setOrCreate('bluetoothName', '');
+          // Approval can take minutes. Preserve computers added by another
+          // ability while this request was waiting instead of overwriting them.
+          this.loadRegistry();
+          if (this.computerStorageError) throw new Error(this.computerStorageError);
+          if (this.computers.some((profile: ComputerProfile) => profile.publicKeyHash === candidate.publicKeyHash && profile.id !== candidate.id))
+            throw new Error('这台电脑已在另一窗口添加，请返回电脑列表后重试');
+          const profiles = this.computers.filter((profile: ComputerProfile) => profile.id !== candidate.id);
+          if (profiles.length >= 8) throw new Error('最多保存 8 台电脑，请先移除不再使用的电脑');
+          profiles.push(candidate);
+          this.saveRegistry(profiles, candidate.id);
+          committed = true; this.computers = profiles; this.activeComputerId = candidate.id;
+          this.loadCurrentComputer();
           this.start();
           return;
         }
@@ -226,22 +382,54 @@ export class BridgeClient {
       }
       throw new Error('配对已过期，请在电脑刷新二维码');
     } catch (error) {
-      this.paired = previous;
-      this.bluetooth = previousBluetooth; this.connectionMode = previousMode;
-      AppStorage.setOrCreate('connectionMode', previousMode);
-      AppStorage.setOrCreate('useBluetooth', previousBluetooth.enabled);
-      this.publishPendingAction();
-      if (previousRoot) this.write('root.pem', previousRoot);
-      this.persistPair();
-      if (previous?.session) this.start();
-      else {
+      const resume = epoch === this.connectionEpoch;
+      this.stop();
+      if (!committed) {
+        try {
+          this.restoreFile(candidateDirectory, 'paired.json', oldPair);
+          this.restoreFile(candidateDirectory, 'root.pem', oldRoot);
+          this.restoreFile(candidateDirectory, 'bluetooth.json', oldBluetooth);
+        } catch (_) { this.computerStorageError = '配对记录恢复未完成，请保留应用数据并检查手机存储'; }
+        this.activeComputerId = previousId;
+      }
+      this.loadCurrentComputer();
+      if (resume && this.paired?.session && !this.computerStorageError) this.start();
+      else if (!this.computerStorageError) {
         AppStorage.setOrCreate('status', `连接未完成 · ${(error as Error).message}`);
         AppStorage.setOrCreate('linkPhase', 'error');
       }
       throw error as Error;
+    } finally { this.pairingBusy = false; }
+  }
+  private readOptional(directory: string, name: string): string | undefined {
+    const path = `${directory}/${name}`;
+    return fs.accessSync(path) ? fs.readTextSync(path) : undefined;
+  }
+  private restoreFile(directory: string, name: string, value?: string): void {
+    if (value !== undefined) this.writeAt(directory, name, value);
+    else if (fs.accessSync(`${directory}/${name}`)) fs.unlinkSync(`${directory}/${name}`);
+  }
+  syncComputerSelection(): void {
+    // The share extension may have selected a computer while the main ability
+    // was backgrounded. Reload only at a quiet foreground boundary.
+    if (!this.active && !this.pairingBusy && !this.sending && !this.actionBusy && this.screenHolds === 0 && this.baseDirectory) {
+      const previousId = this.activeComputerId;
+      this.loadRegistry();
+      if (this.computerStorageError) {
+        AppStorage.setOrCreate('status', this.computerStorageError); AppStorage.setOrCreate('linkPhase', 'error'); return;
+      }
+      if (previousId !== this.activeComputerId) this.loadCurrentComputer();
+      else this.publishComputers();
     }
   }
+  ensureComputer(id: string): void {
+    this.syncComputerSelection();
+    if (this.computerStorageError) throw new Error(this.computerStorageError);
+    if (!id || id !== this.activeComputerId) throw new Error('当前电脑已改变，请切回原电脑后继续分享，或关闭此页重新分享');
+  }
   start(): void {
+    this.syncComputerSelection();
+    if (this.computerStorageError) return;
     if (!this.paired?.session || this.active) return;
     this.active = true;
     if (AppStorage.get<string>('linkPhase') !== 'online') AppStorage.setOrCreate('linkPhase', 'connecting');
@@ -288,6 +476,14 @@ export class BridgeClient {
     if (next && nextParts[0] === previousParts[0] && Number(nextParts[1]) < Number(previousParts[1])) return;
     this.revision = next;
     this.state = state;
+    if (this.paired && !this.pairingBusy && (state.name || state.platform)) {
+      const name = state.name && state.name.length <= 120 ? state.name : this.paired.name;
+      const platform = state.platform ? this.platform(state.platform) : this.platform(this.paired.platform);
+      if (this.paired.name !== name || this.paired.platform !== platform) {
+        this.paired.name = name; this.paired.platform = platform;
+        this.persistPair();
+      }
+    }
     const encoded = JSON.stringify(state);
     if (encoded !== AppStorage.get<string>('stateJSON')) AppStorage.setOrCreate('stateJSON', encoded);
   }
@@ -448,10 +644,12 @@ export class BridgeClient {
     return pending.kind === 'text' ? pending.value : '';
   }
   discardPendingAction(): void {
+    if (this.pairingBusy) throw new Error('请先完成电脑配对');
     if (this.actionBusy) throw new Error('请等待当前操作完成');
     this.saveAction(); // This only stops retries; it does not undo a 电脑 action.
   }
   private async performAction(kind: string, value: string): Promise<void> {
+    if (this.pairingBusy || this.computerStorageError) throw new Error(this.computerStorageError || '请先完成电脑配对');
     if (this.actionBusy) throw new Error('正在确认上一项操作，请稍候');
     if (this.actionStorageError) throw new Error(this.actionStorageError);
     const pair = this.paired;
@@ -497,6 +695,7 @@ export class BridgeClient {
     }
   }
   async markTextReceived(id: string): Promise<void> {
+    if (this.pairingBusy) throw new Error('请先完成电脑配对');
     await this.json<Object>(`/api/items/${id}/received`, http.RequestMethod.POST, '{}');
   }
   private saveJobs(): void {
@@ -504,6 +703,8 @@ export class BridgeClient {
     AppStorage.setOrCreate('outgoingCount', this.sendJobs.length);
   }
   async sendFile(uri: string, suggestedName: string = ''): Promise<void> {
+    if (this.pairingBusy || this.computerStorageError) throw new Error(this.computerStorageError || '请先完成电脑配对');
+    if (!this.paired?.session) throw new Error('请先扫码配对电脑');
     if (this.sending) throw new Error('请等待当前发送完成');
     const file = fs.openSync(uri, fs.OpenMode.READ_ONLY);
     let job: SendJob;
@@ -520,6 +721,7 @@ export class BridgeClient {
     await this.upload(job);
   }
   async retryOutgoing(): Promise<void> {
+    if (this.pairingBusy) throw new Error('请先完成电脑配对');
     this.cancelRequested = false;
     for (const job of this.sendJobs.slice()) {
       if (this.cancelRequested) throw new Error('发送已暂停，进度已保留');
@@ -567,6 +769,7 @@ export class BridgeClient {
     }
   }
   async receive(item: BridgeItem): Promise<void> {
+    if (this.pairingBusy) throw new Error('请先完成电脑配对');
     if (!/^[a-f0-9-]{36}$/.test(item.id) || item.kind !== 'file' || item.source !== 'mac' ||
       !/^[a-f0-9]{64}$/.test(item.sha256 || '') || !Number.isSafeInteger(item.size) || item.size === undefined || item.size < 0 || item.size > 512 * 1024 * 1024) return;
     const existing = this.receiving.get(item.id);
@@ -785,6 +988,7 @@ export class BridgeClient {
     if (!lan) this.discover();
   }
   async setConnectionMode(mode: string): Promise<void> {
+    if (this.pairingBusy) throw new Error('请先完成电脑配对');
     if (!['auto', 'bt', 'lan'].includes(mode)) throw new Error('连接方式无效');
     if (mode === 'bt' && !this.bluetooth.id) throw new Error('请先选择蓝牙电脑');
     if (this.actionBusy || this.sending || this.receiving.size || this.checkingBluetooth) throw new Error('正在传输，请完成或暂停后切换连接方式');
@@ -796,6 +1000,7 @@ export class BridgeClient {
     AppStorage.setOrCreate('status', '正在连接电脑…'); this.start();
   }
   async useBluetoothDevice(id: string, name: string, automatic: boolean = false): Promise<void> {
+    if (this.pairingBusy) throw new Error('请先完成电脑配对');
     if (!this.paired?.session) throw new Error('请先扫码配对电脑');
     if (!/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(id)) throw new Error('蓝牙设备地址无效');
     if (this.actionBusy || this.sending || this.receiving.size || this.checkingBluetooth) throw new Error('请等待当前传输完成');

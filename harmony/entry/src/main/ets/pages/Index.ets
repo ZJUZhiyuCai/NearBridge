@@ -5,7 +5,7 @@ import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { BridgeClient } from '../core/BridgeClient';
 import { BluetoothTunnel, BluetoothPeer } from '../core/BluetoothTunnel';
-import { BridgeState, BridgeItem, Workflow, Job } from '../core/Types';
+import { BridgeState, BridgeItem, Workflow, Job, ComputerSummary } from '../core/Types';
 import {
   Palette, palette, watchTheme, toneFor, glyphFor, glyph, isLink, isImageName, timeLabel, sizeLabel, TINT_TOP, TINT_BOTTOM
 } from '../design/Theme';
@@ -13,10 +13,10 @@ import {
 @Entry
 @Component
 struct Index {
-  // 既有状态（键名与含义不变）
+  // 既有状态（键名与含义不变；macName 为“当前电脑”的名称）
   @StorageLink('paired') private paired: boolean = false;
   @StorageLink('macName') private macName: string = '我的电脑';
-  @StorageLink('status') private status: string = '扫码连接你的电脑';
+  @StorageLink('status') private status: string = '扫码添加你的电脑';
   @StorageLink('progress') private progress: string = '';
   @StorageLink('stateJSON') @Watch('updateState') private stateJSON: string = '{"items":[],"workflows":[],"jobs":[]}';
   @StorageLink('savedJSON') private savedJSON: string = '[]';
@@ -33,10 +33,15 @@ struct Index {
   @StorageProp('linkPhase') private linkPhase: string = '';
   @StorageProp('progressFraction') private progressFraction: number = -1;
   @StorageProp('transferPhase') private transferPhase: string = 'idle';
+  // 我的电脑（BridgeClient 写入）：列表、当前电脑、当前电脑平台
+  @StorageProp('computersJSON') @Watch('updateComputers') private computersJSON: string = '[]';
+  @StorageProp('activeComputerId') @Watch('onComputerChanged') private activeComputerId: string = '';
+  @StorageProp('computerPlatform') private computerPlatform: string = '';
 
   @State private items: BridgeItem[] = [];
   @State private workflows: Workflow[] = [];
   @State private jobs: Job[] = [];
+  @State private computers: ComputerSummary[] = [];
   @State private draft: string = '';
   @State private busy: boolean = false;
   @State private error: string = '';
@@ -49,10 +54,13 @@ struct Index {
   @State private sendingText: boolean = false;
   @State private showAllHistory: boolean = false;
   @State private pulse: boolean = false;
+  @State private editingComputers: boolean = false;
+  @State private switchingTo: string = '';
 
   aboutToAppear(): void {
     watchTheme(this.getUIContext().getHostContext() as common.Context);
     this.updateState();
+    this.updateComputers();
     BridgeClient.shared.start();
   }
 
@@ -61,6 +69,26 @@ struct Index {
       const state = JSON.parse(this.stateJSON) as BridgeState;
       this.items = state.items; this.workflows = state.workflows; this.jobs = state.jobs;
     } catch (_) {}
+  }
+
+  private updateComputers(): void {
+    try {
+      const list = JSON.parse(this.computersJSON) as ComputerSummary[];
+      this.computers = Array.isArray(list) ? list.filter((computer: ComputerSummary) => !!computer && typeof computer.id === 'string') : [];
+    } catch (_) {
+      this.computers = [];
+    }
+  }
+
+  /** 当前电脑变了：只清本页的临时状态。记录、快捷指令、队列由后端按电脑清空并重新同步。 */
+  private onComputerChanged(): void {
+    this.bluetoothPeers = [];
+    this.bluetoothListed = false;
+    this.scanningPeers = false;
+    this.showAllHistory = false;
+    this.runningFlow = '';
+    this.doneFlow = '';
+    this.editingComputers = false;
   }
 
   private context(): common.UIAbilityContext { return this.getUIContext().getHostContext() as common.UIAbilityContext; }
@@ -77,6 +105,7 @@ struct Index {
 
   private async scan(): Promise<void> {
     const result = await scanBarcode.startScanForResult(this.context(), { scanTypes: [scanCore.ScanType.QR_CODE], enableMultiMode: false, enableAlbum: true });
+    // 后端：添加或更新这台电脑并设为当前；已添加的其他电脑保留
     await BridgeClient.shared.pair(result.originalValue);
   }
   private async selectFiles(): Promise<void> {
@@ -123,7 +152,7 @@ struct Index {
         const text = this.draft;
         await BridgeClient.shared.sendText(text);
         if (this.draft === text) this.draft = '';
-        this.toast('已发到电脑');
+        this.toast(`已发到 ${this.macName}`);
       } finally {
         this.sendingText = false;
       }
@@ -137,7 +166,7 @@ struct Index {
       try {
         await BridgeClient.shared.runWorkflow(flow.id);
         this.doneFlow = flow.id;
-        this.toast(`已交给电脑：${flow.name}`);
+        this.toast(`已交给 ${this.macName}：${flow.name}`);
         setTimeout(() => { if (this.doneFlow === flow.id) this.doneFlow = ''; }, 1800);
       } finally {
         this.runningFlow = '';
@@ -171,11 +200,83 @@ struct Index {
     });
   }
 
+  // ---------- 我的电脑 ----------
+
+  /** 切换收发目标。后端会保留各电脑的证书、蓝牙设置、队列与历史，并在传输/配对/执行中拒绝切换。 */
+  private chooseComputer(computer: ComputerSummary): void {
+    if (this.isCurrent(computer) || !this.canSwitch()) return;
+    const keptDraft = this.draft.trim().length > 0;
+    this.switchingTo = computer.id;
+    this.execute(async () => {
+      try {
+        await BridgeClient.shared.selectComputer(computer.id);
+        this.onComputerChanged();
+        this.toast(keptDraft ? `已切换到 ${computer.name}。输入框里的文字还在，发送前请确认目标` : `已切换到 ${computer.name}`);
+      } finally {
+        this.switchingTo = '';
+      }
+    });
+  }
+
+  private addComputer(): void {
+    const hadOthers = this.computerList().length > 0;
+    this.execute(async () => {
+      await this.scan();
+      this.toast(hadOthers ? `现在发到 ${this.macName}，之前添加的电脑仍在“我的电脑”里` : `已连接 ${this.macName}`);
+    });
+  }
+
+  private removeComputer(computer: ComputerSummary): void {
+    this.execute(async () => {
+      const choice = await this.getUIContext().getPromptAction().showDialog({
+        title: `从这台手机移除“${computer.name}”？`,
+        message: '只会从这台手机的“我的电脑”里移除，电脑上已经收到的文件和已经执行的操作不受影响。之后可以在这台电脑的 NearBridge 打开配对码，重新扫码添加。',
+        buttons: [{ text: '保留', color: this.c().text2 }, { text: '移除', color: this.c().danger }]
+      });
+      if (choice.index === 1) {
+        await BridgeClient.shared.removeComputer(computer.id);
+        this.toast(`已移除 ${computer.name}`);
+        if (this.computers.length <= 1) this.editingComputers = false;
+      }
+    });
+  }
+
   // ---------- 派生状态 ----------
 
   private c(): Palette { return palette(this.dark); }
   private canSend(): boolean { return !this.busy && this.draft.trim().length > 0; }
   private isSaved(item: BridgeItem): boolean { return this.savedJSON.includes(item.id); }
+
+  /** 列表为空但已配对（后端尚未写入 computersJSON）时，用当前电脑合成一行，只读。 */
+  private computerList(): ComputerSummary[] {
+    if (this.computers.length > 0) return this.computers;
+    if (!this.paired) return [];
+    const current: ComputerSummary = { id: this.activeComputerId, name: this.macName, platform: this.computerPlatform || 'unknown' };
+    return [current];
+  }
+  private isCurrent(computer: ComputerSummary): boolean {
+    return this.computers.length === 0 || computer.id === this.activeComputerId;
+  }
+  private multiComputer(): boolean { return this.computers.length > 1; }
+  private platformTag(platform: string): string {
+    if (platform === 'windows') return 'Windows';
+    if (platform === 'macos') return 'Mac';
+    return '';
+  }
+  /** 本页能判断的不可切换原因；后端仍做最终判断。 */
+  private switchBlockReason(): string {
+    if (this.transferPhase === 'sending' || this.transferPhase === 'receiving') return '正在收发文件，完成或暂停后再切换电脑';
+    if (this.phase() === 'waitingApproval') return '正在等待电脑允许配对';
+    if (this.runningFlow) return '快捷指令正在交给电脑';
+    return '';
+  }
+  private canSwitch(): boolean { return !this.busy && this.switchBlockReason().length === 0; }
+  private computerKey(computer: ComputerSummary): string {
+    return `${computer.id}|${computer.name}|${computer.platform}|${this.isCurrent(computer)}`;
+  }
+  private showBluetoothGuide(): boolean {
+    return !this.bluetoothName && (this.connectionMode !== 'lan' || this.bluetoothListed);
+  }
 
   /** 优先用后端的 linkPhase；没有时按旧状态文字粗略判断。 */
   private phase(): string {
@@ -280,7 +381,7 @@ struct Index {
       height: SheetSize.LARGE,
       dragBar: true,
       backgroundColor: this.c().bg,
-      onDisappear: () => { this.showSettings = false; }
+      onDisappear: () => { this.showSettings = false; this.editingComputers = false; }
     })
   }
 
@@ -294,6 +395,7 @@ struct Index {
           Image(glyph('close')).width(11).height(11).fillColor(this.c().text2)
         }
         .width(28).height(28).backgroundColor(this.c().fill)
+        .accessibilityText('关闭提示')
         .onClick(() => { this.error = ''; })
       }
       .width('100%')
@@ -332,13 +434,14 @@ struct Index {
       .width(280).height(250)
       .onAppear(() => { setTimeout(() => { this.pulse = true; }, 80); })
 
-      Text('连接你的电脑').fontSize(30).fontWeight(FontWeight.Bold).fontColor(this.c().text).margin({ top: 4 })
-      Text('配对一次，以后打开就能用。').fontSize(15).fontColor(this.c().text2).margin({ top: 8 })
+      Text('添加你的电脑').fontSize(30).fontWeight(FontWeight.Bold).fontColor(this.c().text).margin({ top: 4 })
+      Text('Windows 或 Mac 都可以。配对一次，以后打开就能用。').fontSize(15).fontColor(this.c().text2)
+        .textAlign(TextAlign.Center).margin({ top: 8 })
 
       Column() {
         this.stepRow(1, '手机和电脑连同一个 Wi‑Fi')
         Divider().color(this.c().separator).margin({ left: 36 })
-        this.stepRow(2, '在电脑的 NearBridge 打开“设备连接”')
+        this.stepRow(2, '在要添加的 Windows 或 Mac 上，打开 NearBridge 配对码')
         Divider().color(this.c().separator).margin({ left: 36 })
         this.stepRow(3, '扫码后，在电脑上点“允许”')
       }
@@ -357,7 +460,7 @@ struct Index {
           } else {
             Image(glyph('scan')).width(20).height(20).fillColor(Color.White)
           }
-          Text(this.busy ? '等待电脑允许…' : '扫码连接').fontSize(17).fontWeight(FontWeight.Medium).fontColor(Color.White)
+          Text(this.busy ? '等待电脑允许…' : '扫码添加电脑').fontSize(17).fontWeight(FontWeight.Medium).fontColor(Color.White)
         }
       }
       .width('100%').height(54)
@@ -390,6 +493,7 @@ struct Index {
     Scroll() {
       Column() {
         this.header()
+        if (this.multiComputer()) { this.computerStrip() }
         ForEach(this.freshFromMac(), (item: BridgeItem) => { this.macCard(item) }, (item: BridgeItem) => item.id)
         this.sendTiles()
         this.composer()
@@ -425,9 +529,19 @@ struct Index {
   @Builder header() {
     Row({ space: 12 }) {
       Column({ space: 6 }) {
-        Text(this.macName)
-          .fontSize(32).fontWeight(FontWeight.Bold).fontColor(this.c().text)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text('当前电脑').fontSize(13).fontColor(this.c().text2)
+        Row({ space: 8 }) {
+          Text(this.macName)
+            .fontSize(30).fontWeight(FontWeight.Bold).fontColor(this.c().text)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .flexShrink(1)
+          if (this.platformTag(this.computerPlatform)) {
+            this.platformChip(this.computerPlatform, false)
+          }
+          Image(glyph('chevron')).width(12).height(12).fillColor(this.c().text3).rotate({ angle: 90 }).flexShrink(0)
+        }
+        .onClick(() => { this.showSettings = true; })
+        .accessibilityText(`当前电脑：${this.macName}。点按查看我的电脑`)
         Row({ space: 6 }) {
           Column() {}.width(8).height(8).borderRadius(4).backgroundColor(this.dotColor())
           Text(this.linkLine()).fontSize(14).fontColor(this.c().text2).maxLines(1)
@@ -444,20 +558,90 @@ struct Index {
       }
       .width(38).height(38)
       .backgroundColor(this.c().card)
-      .margin({ top: 4 })
+      .margin({ top: 18 })
+      .accessibilityText('我的电脑、连接与设置')
       .onClick(() => { this.showSettings = true; })
     }
     .width('100%')
     .alignItems(VerticalAlign.Top)
-    .padding({ top: 24, bottom: 18, left: 4 })
+    .padding({ top: 20, bottom: 14, left: 4 })
+  }
+
+  @Builder platformChip(platform: string, inverse: boolean) {
+    Text(this.platformTag(platform))
+      .fontSize(11).fontWeight(FontWeight.Medium)
+      .fontColor(inverse ? Color.White : this.c().tint)
+      .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+      .borderRadius(6)
+      .backgroundColor(inverse ? '#33FFFFFF' : this.c().tintSoft)
+      .flexShrink(0)
+  }
+
+  /** 两台及以上：标题下的一排电脑，点一下切换当前收发目标。 */
+  @Builder computerStrip() {
+    Column({ space: 6 }) {
+      Scroll() {
+        Row({ space: 8 }) {
+          ForEach(this.computerList(), (computer: ComputerSummary) => { this.computerChip(computer) },
+            (computer: ComputerSummary) => this.computerKey(computer))
+          Button({ type: ButtonType.Circle, stateEffect: true }) {
+            Image(glyph('scan')).width(15).height(15).fillColor(this.c().tint)
+          }
+          .width(34).height(34)
+          .backgroundColor(this.c().card)
+          .enabled(!this.busy)
+          .accessibilityText('添加电脑')
+          .onClick(() => { this.addComputer(); })
+        }
+        .padding({ left: 4, right: 4 })
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
+      .width('100%')
+      .align(Alignment.Start)
+      if (this.switchBlockReason()) {
+        Text(this.switchBlockReason()).fontSize(12).fontColor(this.c().text3).padding({ left: 6 })
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .margin({ bottom: 14 })
+  }
+
+  @Builder computerChip(computer: ComputerSummary) {
+    Row({ space: 6 }) {
+      if (this.switchingTo === computer.id) {
+        LoadingProgress().width(14).height(14).color(this.c().tint)
+      } else {
+        Image(glyph('laptop')).width(14).height(14)
+          .fillColor(this.isCurrent(computer) ? Color.White : this.c().tint)
+      }
+      Text(computer.name)
+        .fontSize(14).fontWeight(FontWeight.Medium)
+        .fontColor(this.isCurrent(computer) ? Color.White : this.c().text)
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .constraintSize({ maxWidth: 150 })
+      if (this.platformTag(computer.platform)) {
+        Text(this.platformTag(computer.platform))
+          .fontSize(11)
+          .fontColor(this.isCurrent(computer) ? '#D9FFFFFF' : this.c().text2)
+      }
+    }
+    .height(34)
+    .padding({ left: 12, right: 12 })
+    .borderRadius(17)
+    .backgroundColor(this.isCurrent(computer) ? this.c().tint : this.c().card)
+    .opacity(!this.isCurrent(computer) && !this.canSwitch() ? 0.5 : 1)
+    .accessibilityText(this.isCurrent(computer) ? `${computer.name}，当前电脑` : `${computer.name}，点按切换为当前电脑`)
+    .onClick(() => { this.chooseComputer(computer); })
   }
 
   @Builder macCard(item: BridgeItem) {
     Column({ space: 10 }) {
       Row({ space: 6 }) {
         Image(glyph('laptop')).width(16).height(16).fillColor(this.c().tint)
-        Text('电脑发来').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.c().tint)
-        Blank()
+        Text(`${this.macName} 发来`).fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.c().tint)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
         Text(timeLabel(item.createdAt)).fontSize(12).fontColor(this.c().text3)
       }
       .width('100%')
@@ -505,7 +689,8 @@ struct Index {
           .width(44).height(44).borderRadius(22).justifyContent(FlexAlign.Center).backgroundColor('#33FFFFFF')
           Blank()
           Text('照片和视频').fontSize(17).fontWeight(FontWeight.Bold).fontColor(Color.White)
-          Text('发到电脑').fontSize(12).fontColor('#D9FFFFFF').margin({ top: 2 })
+          Text(`发到 ${this.macName}`).fontSize(12).fontColor('#D9FFFFFF').margin({ top: 2 })
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .width('100%').height('100%')
         .alignItems(HorizontalAlign.Start)
@@ -518,6 +703,7 @@ struct Index {
       .shadow({ radius: 16, color: '#330A6CFF', offsetY: 6 })
       .enabled(!this.busy)
       .opacity(this.busy ? 0.55 : 1)
+      .accessibilityText(`选择照片和视频，发到 ${this.macName}`)
       .onClick(() => { this.execute(async () => { await this.selectPhotos(); }); })
 
       Button({ type: ButtonType.Normal, stateEffect: true }) {
@@ -539,6 +725,7 @@ struct Index {
       .backgroundColor(this.c().card)
       .enabled(!this.busy)
       .opacity(this.busy ? 0.55 : 1)
+      .accessibilityText(`选择文件，发到 ${this.macName}`)
       .onClick(() => { this.execute(async () => { await this.selectFiles(); }); })
     }
     .width('100%')
@@ -574,6 +761,14 @@ struct Index {
             }
           })
         Blank()
+        // 多台电脑时，输入后占位文字消失，这里始终写明目标
+        if (this.multiComputer()) {
+          Text(`发给 ${this.macName}`)
+            .fontSize(12).fontColor(this.c().text2)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ maxWidth: 150 })
+            .margin({ right: 8 })
+        }
         Button({ type: ButtonType.Circle, stateEffect: true }) {
           if (this.sendingText) {
             LoadingProgress().width(20).height(20).color(Color.White)
@@ -584,6 +779,7 @@ struct Index {
         .width(36).height(36)
         .backgroundColor(this.canSend() || this.sendingText ? this.c().tint : this.c().fill)
         .enabled(this.canSend())
+        .accessibilityText(`发送到 ${this.macName}`)
         .onClick(() => { this.sendDraft(); })
       }
       .width('100%')
@@ -617,7 +813,8 @@ struct Index {
               .fontSize(12).fontColor(this.c().text2)
           }
           if (this.outgoingCount > 0) {
-            Text(`${this.outgoingCount} 个文件待发`).fontSize(12).fontColor(this.c().text2)
+            Text(`${this.outgoingCount} 个文件待发到 ${this.macName}`).fontSize(12).fontColor(this.c().text2)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
         }
         .alignItems(HorizontalAlign.Start)
@@ -701,6 +898,7 @@ struct Index {
     .shadow({ radius: 12, color: '#26000000', offsetY: 4 })
     .opacity(this.busy && this.runningFlow !== flow.id ? 0.55 : 1)
     .enabled(!this.busy)
+    .accessibilityText(`在 ${this.macName} 运行：${flow.name}`)
     .onClick(() => { this.runFlow(flow); })
   }
 
@@ -713,7 +911,7 @@ struct Index {
       }
       .margin({ bottom: 6 })
       Text('还没有快捷指令').fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.c().text)
-      Text('在电脑 NearBridge 的“工作流”里添加并打开“手机可用”，按钮就会出现在这里。')
+      Text(`在 ${this.macName} 的 NearBridge“快捷指令”里添加，并打开“手机可用”，按钮就会出现在这里。`)
         .fontSize(13).fontColor(this.c().text2).textAlign(TextAlign.Center)
     }
     .width('100%')
@@ -770,7 +968,8 @@ struct Index {
       Column({ space: 6 }) {
         Image(glyph('bubble')).width(28).height(28).fillColor(this.c().text3)
         Text('还没有记录').fontSize(15).fontColor(this.c().text2)
-        Text('发出去的和收到的都会出现在这里。').fontSize(13).fontColor(this.c().text3)
+        Text(`和 ${this.macName} 之间发出、收到的内容都会出现在这里。`).fontSize(13).fontColor(this.c().text3)
+          .textAlign(TextAlign.Center)
       }
       .width('100%')
       .padding(28)
@@ -858,7 +1057,7 @@ struct Index {
   @Builder pendingActionCard() {
     Column({ space: 10 }) {
       Text(this.pendingAction).fontSize(15).fontWeight(FontWeight.Medium).fontColor(this.c().text).width('100%')
-      Text('重试会继续同一项操作。不会因回执丢失而再次发送或执行。')
+      Text(`目标：${this.macName}。重试会继续同一项操作，不会因回执丢失而再次发送或执行。`)
         .fontSize(12).fontColor(this.c().text2).width('100%')
       Row({ space: 12 }) {
         Button('重试确认').fontColor(Color.White).backgroundColor(this.c().tint).enabled(!this.busy)
@@ -886,41 +1085,39 @@ struct Index {
 
       Scroll() {
         Column() {
-          Row({ space: 14 }) {
-            Column() {
-              Image(glyph('laptop')).width(28).height(28).fillColor(Color.White)
-            }
-            .width(56).height(56).borderRadius(16).justifyContent(FlexAlign.Center)
-            .linearGradient({ angle: 160, colors: [[TINT_TOP, 0.0], [TINT_BOTTOM, 1.0]] })
-            Column({ space: 4 }) {
-              Text(this.macName).fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.c().text).maxLines(1)
-              Row({ space: 6 }) {
-                Column() {}.width(7).height(7).borderRadius(4).backgroundColor(this.dotColor())
-                Text(this.linkLine()).fontSize(13).fontColor(this.c().text2).maxLines(1)
-              }
-              if (this.status) { Text(this.status).fontSize(12).fontColor(this.c().text3).maxLines(2) }
-            }
-            .alignItems(HorizontalAlign.Start)
-            .layoutWeight(1)
-          }
-          .width('100%')
-          .padding(16)
-          .borderRadius(20)
-          .backgroundColor(this.c().card)
-          .margin({ top: 8 })
+          this.computersGroup()
 
-          this.groupTitle('连接方式')
+          this.groupTitle(`连接方式 · ${this.macName}`)
           Row({ space: 12 }) {
             this.routeCard('auto', '自动', '优先高速连接', '', glyph('laptop'))
             this.routeCard('lan', '仅局域网', '适合大文件', '', glyph('wifi'))
             this.routeCard('bt', '仅蓝牙', '无需同一 Wi‑Fi', '', glyph('bluetooth'))
           }
           .width('100%')
-          this.footnote('自动：优先使用局域网，连接不上时尝试已选的蓝牙电脑。正在传输时保持当前线路。选择“仅蓝牙”后，所有内容只走蓝牙。')
-          if (this.connectionMode !== 'lan') {
-            Button(this.bluetoothName ? `蓝牙电脑：${this.bluetoothName} · 更换` : '选择蓝牙电脑作为备用')
-              .fontSize(14).fontColor(this.c().tint).backgroundColor(Color.Transparent).margin({ top: 8 })
-              .enabled(!this.busy).onClick(() => { this.findMacs(); })
+          this.footnote('自动：优先使用局域网，连接不上时尝试已选的蓝牙电脑。正在传输时保持当前线路。选择“仅蓝牙”后，所有内容只走蓝牙。连接方式和蓝牙设置按电脑分别保存。')
+
+          if (this.showBluetoothGuide()) {
+            this.bluetoothGuide()
+          } else if (this.connectionMode !== 'lan') {
+            Row({ space: 10 }) {
+              Image(glyph('bluetooth')).width(18).height(18).fillColor(this.c().tint)
+              Column({ space: 2 }) {
+                Text(`蓝牙对应：${this.bluetoothName}`).fontSize(15).fontColor(this.c().text).maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(`手机用这台蓝牙设备连接 ${this.macName}`).fontSize(12).fontColor(this.c().text2).maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+              Button('更换', { type: ButtonType.Capsule })
+                .fontSize(14).fontColor(this.c().tint).backgroundColor(this.c().tintSoft).height(30)
+                .enabled(!this.busy).onClick(() => { this.findMacs(); })
+            }
+            .width('100%')
+            .padding({ left: 16, right: 12, top: 12, bottom: 12 })
+            .borderRadius(18)
+            .backgroundColor(this.c().card)
+            .margin({ top: 12 })
           }
 
           if (this.bluetoothListed) { this.peerList() }
@@ -973,30 +1170,15 @@ struct Index {
           this.groupTitle('从其他 App 发送')
           Column({ space: 6 }) {
             Text('在图库或文件管理里点“分享”，选择“发送到电脑”。').fontSize(15).fontColor(this.c().text)
-            Text('在分享页点一下“发送到电脑”即可，照片、文件、文字都行。').fontSize(13).fontColor(this.c().text2)
+            Text(this.multiComputer()
+              ? '分享页会显示要发到哪台电脑；开始发送前可以更换。照片、文件、文字都行。'
+              : '在分享页点一下“发送到电脑”即可，照片、文件、文字都行。').fontSize(13).fontColor(this.c().text2)
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
           .padding(16)
           .borderRadius(18)
           .backgroundColor(this.c().card)
-
-          this.groupTitle('配对')
-          Row({ space: 10 }) {
-            Column({ space: 3 }) {
-              Text('重新扫码连接').fontSize(16).fontColor(this.c().tint)
-              Text('换了电脑或配对失效时使用；需要在电脑上点“允许”。').fontSize(12).fontColor(this.c().text2)
-            }
-            .alignItems(HorizontalAlign.Start)
-            .layoutWeight(1)
-            Image(glyph('scan')).width(18).height(18).fillColor(this.c().tint)
-          }
-          .width('100%')
-          .padding({ left: 16, right: 14, top: 12, bottom: 12 })
-          .borderRadius(18)
-          .backgroundColor(this.c().card)
-          .opacity(this.busy ? 0.5 : 1)
-          .onClick(() => { this.execute(async () => { await this.scan(); }); })
 
           Text('NearBridge · 加密直连').fontSize(12).fontColor(this.c().text3).margin({ top: 28, bottom: 36 })
         }
@@ -1014,8 +1196,156 @@ struct Index {
     .backgroundColor(this.c().bg)
   }
 
+  /** 我的电脑：列表 + 添加；编辑模式下可从手机移除。 */
+  @Builder computersGroup() {
+    Row() {
+      Text('我的电脑').fontSize(13).fontColor(this.c().text2)
+      Blank()
+      if (this.computers.length > 0) {
+        Button(this.editingComputers ? '完成' : '编辑', { type: ButtonType.Capsule })
+          .fontSize(13).fontColor(this.c().tint).backgroundColor(Color.Transparent).height(28)
+          .enabled(!this.busy)
+          .onClick(() => { this.editingComputers = !this.editingComputers; })
+      }
+    }
+    .width('100%')
+    .padding({ left: 16, right: 4, top: 12, bottom: 4 })
+
+    Column() {
+      ForEach(this.computerList(), (computer: ComputerSummary) => { this.computerRow(computer) },
+        (computer: ComputerSummary) => `${this.computerKey(computer)}|${this.editingComputers}`)
+      Row({ space: 12 }) {
+        Column() {
+          if (this.busy && !this.switchingTo && !this.editingComputers) {
+            LoadingProgress().width(20).height(20).color(this.c().tint)
+          } else {
+            Image(glyph('scan')).width(20).height(20).fillColor(this.c().tint)
+          }
+        }
+        .width(40).height(40).borderRadius(12).justifyContent(FlexAlign.Center)
+        .backgroundColor(this.c().tintSoft)
+        Column({ space: 3 }) {
+          Text('添加电脑').fontSize(16).fontColor(this.c().tint)
+          Text('在要添加的 Windows 或 Mac 上打开 NearBridge 配对码，扫码后在电脑上点“允许”。已添加的电脑会保留；配对失效时扫同一台即可更新。')
+            .fontSize(12).fontColor(this.c().text2)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      .opacity(this.busy || this.editingComputers ? 0.5 : 1)
+      .accessibilityText('添加电脑，扫码添加')
+      .onClick(() => { if (!this.editingComputers) this.addComputer(); })
+    }
+    .width('100%')
+    .borderRadius(20)
+    .backgroundColor(this.c().card)
+    .clip(true)
+
+    if (this.multiComputer() && this.switchBlockReason()) {
+      this.footnote(this.switchBlockReason())
+    }
+    this.footnote('收发、快捷指令和记录都跟着“当前电脑”。每台电脑的配对、蓝牙设置、待发文件和记录分开保存；切换后，上一台没发完的内容不会发到新电脑。')
+  }
+
+  @Builder computerRow(computer: ComputerSummary) {
+    Column() {
+      Row({ space: 12 }) {
+        Column() {
+          Image(glyph('laptop')).width(22).height(22).fillColor(this.isCurrent(computer) ? Color.White : this.c().tint)
+        }
+        .width(40).height(40).borderRadius(12).justifyContent(FlexAlign.Center)
+        .backgroundColor(this.isCurrent(computer) ? this.c().tint : this.c().tintSoft)
+
+        Column({ space: 3 }) {
+          Row({ space: 6 }) {
+            Text(computer.name).fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.c().text)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
+            if (this.platformTag(computer.platform)) {
+              this.platformChip(computer.platform, false)
+            }
+          }
+          if (this.isCurrent(computer)) {
+            Row({ space: 6 }) {
+              Column() {}.width(7).height(7).borderRadius(4).backgroundColor(this.dotColor())
+              Text(`当前 · ${this.linkLine()}`).fontSize(12).fontColor(this.c().text2).maxLines(1)
+            }
+          } else {
+            Text('点按切换为当前电脑').fontSize(12).fontColor(this.c().text2).maxLines(1)
+          }
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        if (this.editingComputers && this.computers.length > 0) {
+          Button('移除', { type: ButtonType.Capsule })
+            .fontSize(13).fontColor(this.c().danger).backgroundColor(this.c().fill).height(30)
+            .enabled(!this.busy)
+            .accessibilityText(`从这台手机移除 ${computer.name}`)
+            .onClick(() => { this.removeComputer(computer); })
+        } else if (this.switchingTo === computer.id) {
+          LoadingProgress().width(20).height(20).color(this.c().tint)
+        } else if (this.isCurrent(computer)) {
+          Image(glyph('check')).width(18).height(18).fillColor(this.c().tint)
+        }
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .opacity(!this.isCurrent(computer) && !this.editingComputers && !this.canSwitch() ? 0.5 : 1)
+      .accessibilityText(this.isCurrent(computer) ? `${computer.name}，当前电脑` : `${computer.name}，点按切换为当前电脑`)
+      .onClick(() => { if (!this.editingComputers) { this.chooseComputer(computer); } })
+      Divider().color(this.c().separator).margin({ left: 66 })
+    }
+  }
+
+  /** 首次选择蓝牙电脑：三步说明 + 查找按钮。Mac 与 Windows 的开关文案相同。 */
+  @Builder bluetoothGuide() {
+    Column() {
+      Text(`为 ${this.macName} 设置蓝牙`).fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.c().text)
+        .width('100%').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).padding({ bottom: 4 })
+      this.guideStep(1, `在 ${this.macName} 的 NearBridge 中，打开“允许手机用蓝牙连接”`)
+      this.guideStep(2, '手机询问蓝牙权限时，选择“允许”')
+      this.guideStep(3, `点“查找附近的电脑”，选择与 ${this.macName} 同名的那台`)
+      Button({ type: ButtonType.Capsule, stateEffect: true }) {
+        Row({ space: 8 }) {
+          if (this.scanningPeers) {
+            LoadingProgress().width(18).height(18).color(Color.White)
+          } else {
+            Image(glyph('bluetooth')).width(16).height(16).fillColor(Color.White)
+          }
+          Text(this.scanningPeers ? '正在查找…' : (this.bluetoothListed ? '重新查找' : '查找附近的电脑'))
+            .fontSize(15).fontWeight(FontWeight.Medium).fontColor(Color.White)
+        }
+      }
+      .width('100%').height(42)
+      .margin({ top: 10 })
+      .backgroundColor(this.c().tint)
+      .enabled(!this.busy)
+      .opacity(this.busy ? 0.6 : 1)
+      .onClick(() => { this.findMacs(); })
+    }
+    .width('100%')
+    .padding(16)
+    .borderRadius(18)
+    .backgroundColor(this.c().card)
+    .margin({ top: 12 })
+  }
+
+  @Builder guideStep(n: number, text: string) {
+    Row({ space: 10 }) {
+      Text(`${n}`).fontSize(12).fontWeight(FontWeight.Bold).fontColor(Color.White)
+        .width(22).height(22).borderRadius(11).textAlign(TextAlign.Center).backgroundColor(this.c().tint)
+      Text(text).fontSize(14).fontColor(this.c().text).layoutWeight(1)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Top)
+    .padding({ top: 6, bottom: 6 })
+  }
+
   @Builder groupTitle(title: string) {
     Text(title).fontSize(13).fontColor(this.c().text2).width('100%').padding({ left: 16, top: 24, bottom: 8 })
+      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
   }
 
   @Builder footnote(text: string) {
@@ -1075,14 +1405,23 @@ struct Index {
       .padding({ left: 16, right: 8, top: 10, bottom: 4 })
 
       if (!this.scanningPeers && this.bluetoothPeers.length === 0) {
-        Text('没找到电脑。请在 Windows NearBridge 窗口顶部点“开启蓝牙”，再点“重新查找”。')
+        Text(`没找到电脑。请确认 ${this.macName} 的蓝牙已打开，并在它的 NearBridge 中打开了“允许手机用蓝牙连接”，然后点“重新查找”。`)
           .fontSize(13).fontColor(this.c().text2).width('100%')
           .padding({ left: 16, right: 16, bottom: 14 })
       }
       ForEach(this.bluetoothPeers, (peer: BluetoothPeer) => {
         Row({ space: 12 }) {
           Image(glyph('laptop')).width(22).height(22).fillColor(this.c().tint)
-          Text(peer.name).fontSize(16).fontColor(this.c().text).layoutWeight(1).maxLines(1)
+          Row({ space: 6 }) {
+            Text(peer.name).fontSize(16).fontColor(this.c().text).maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
+            if (peer.name === this.macName) {
+              Text('同名').fontSize(11).fontWeight(FontWeight.Medium).fontColor(this.c().tint)
+                .padding({ left: 6, right: 6, top: 2, bottom: 2 }).borderRadius(6).backgroundColor(this.c().tintSoft)
+                .flexShrink(0)
+            }
+          }
+          .layoutWeight(1)
           if (this.useBluetooth && this.bluetoothName === peer.name) {
             Image(glyph('check')).width(16).height(16).fillColor(this.c().tint)
           } else {
@@ -1096,7 +1435,7 @@ struct Index {
           this.execute(async () => {
             await BridgeClient.shared.useBluetoothDevice(peer.id, peer.name, this.connectionMode === 'auto');
             this.bluetoothListed = false;
-            this.toast(`已选择蓝牙电脑：${peer.name}`);
+            this.toast(`${this.macName} 的蓝牙设备：${peer.name}`);
           });
         })
       }, (peer: BluetoothPeer) => peer.id)

@@ -22,13 +22,14 @@ internal sealed class BridgeWindow : Form
     Process? service;
     StreamWriter? log;
     bool exiting, ready, bluetoothEnabled;
+    string bluetoothMessage = "蓝牙未开启";
     readonly ToolStripButton bluetoothButton = new("开启蓝牙");
     readonly ToolStripButton retryButton = new("重试队列 / 确认");
 
     internal BridgeWindow(string[] files)
     {
         initialFiles = files;
-        Text = "NearBridge · Windows 与鸿蒙互联";
+        Text = "NearBridge";
         Size = new Size(1100, 820); MinimumSize = new Size(780, 620);
         StartPosition = FormStartPosition.CenterScreen;
         Icon = SystemIcons.Application;
@@ -92,7 +93,7 @@ internal sealed class BridgeWindow : Form
         client = new BridgeClient(Program.DataDirectory, new Uri($"http://127.0.0.1:{port}/"));
         client.Changed += Emit;
         bluetooth = new BluetoothBridge(nativePort);
-        bluetooth.Status += (message, enabled) => UI(() => { bluetoothEnabled = enabled; bluetoothButton.Text = enabled ? "关闭蓝牙" : "开启蓝牙"; status.Text = message; Emit(new { type = "bluetooth", message, enabled }); });
+        bluetooth.Status += (message, enabled) => UI(() => { bluetoothEnabled = enabled; bluetoothMessage = message; bluetoothButton.Text = enabled ? "关闭蓝牙" : "开启蓝牙"; status.Text = message; Emit(new { type = "bluetooth", message, enabled }); });
         if (!await Healthy())
         {
             var root = Path.Combine(AppContext.BaseDirectory, "bridge");
@@ -140,7 +141,13 @@ internal sealed class BridgeWindow : Form
             });
         };
         await core.AddScriptToExecuteOnDocumentCreatedAsync("window.nearBridgeWindows = true;");
-        core.NavigationCompleted += (_, _) => { ready = true; client.Report(); };
+        core.NavigationCompleted += (_, e) => {
+            ready = e.IsSuccess;
+            // The web workspace owns the normal controls. Retain the native
+            // toolbar as a recovery surface if WebView2 cannot load the page.
+            toolbar.Visible = !ready;
+            if (ready) { ReportHost(); client.Report(); }
+        };
         core.Navigate(client.BaseUri.AbsoluteUri);
         if (!RegisterHotKey(Handle, 1, 0x4003, 0x20)) WriteLog("Ctrl+Alt+Space 已被其他程序使用，可从托盘打开");
         _ = ListenPipe();
@@ -173,8 +180,22 @@ internal sealed class BridgeWindow : Form
             case "clipboard": await client.SendAction("text", Clipboard.GetText()); break;
             case "workflow": await client.SendAction("workflow", data["id"]?.ToString() ?? ""); break;
             case "retry": await Retry(); break;
-            case "status": client.Report(); break;
+            // The trusted workspace confirms before issuing this command.
+            // The native fallback toolbar keeps its own confirmation dialog.
+            case "forget": await client.ForgetAction(); break;
+            case "openWorkflows": OpenWorkflows(); break;
+            case "bluetooth":
+                if (data["enabled"] is JsonValue value && value.TryGetValue<bool>(out var enabled) && enabled != bluetoothEnabled)
+                    await ToggleBluetooth();
+                else ReportHost();
+                break;
+            case "status": ReportHost(); client.Report(); break;
         }
+    }
+    void ReportHost()
+    {
+        Emit(new { type = "host", actions = new[] { "bluetooth", "forget", "openWorkflows" } });
+        Emit(new { type = "bluetooth", message = bluetoothMessage, enabled = bluetoothEnabled });
     }
     Task ChooseFiles()
     {
@@ -201,7 +222,7 @@ internal sealed class BridgeWindow : Form
     }
     async Task ToggleBluetooth()
     {
-        if (bluetooth == null) return;
+        if (bluetooth == null || !bluetoothButton.Enabled) return;
         bluetoothButton.Enabled = false;
         try { if (bluetoothEnabled) await bluetooth.Stop(); else await bluetooth.Start(); }
         finally { bluetoothButton.Enabled = true; }

@@ -285,7 +285,7 @@ struct BridgeView: View {
                 }
                 VStack(alignment: .leading, spacing: 13) {
                     step(1, "手机和这台 Mac 连同一个 Wi‑Fi")
-                    step(2, "在手机 NearBridge 点“扫码连接”")
+                    step(2, "在手机 NearBridge 点“添加电脑”")
                     step(3, "扫这里的配对码，再回到 Mac 点“允许”")
                 }
                 .padding(18)
@@ -801,7 +801,7 @@ struct BridgeView: View {
             } else {
                 VStack(spacing: 4) {
                     Text("用手机扫一扫").font(.system(size: 22, weight: .bold))
-                    Text("打开手机 NearBridge，点“扫码连接”").foregroundStyle(.secondary)
+                    Text("打开手机 NearBridge，点“添加电脑”").foregroundStyle(.secondary)
                 }
                 ZStack {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
