@@ -17,10 +17,10 @@ Windows 托盘 / WebView2 · ArkTS / ArkUI · 局域网 HTTPS · 实验性 BLE �
 | 双向文件、断点续传、SHA-256 收件回执 | 保留；Windows 编译客户端有丢响应/重启续传回归 |
 | 文字、工作流可靠重试 | 两端持久化操作编号，七天内复用回执 |
 | 增量同步、即时通知、自动/仅蓝牙/仅局域网 | 保留；Windows 使用同一 delta-v1 协议 |
-| BLE 文字、小文件与工作流 | Windows GATT 中继已实现；依赖外围设备模式，尚待 Windows ↔ 鸿蒙真机验收 |
+| BLE 文字、小文件与工作流 | Windows GATT 中继已实现；本机与鸿蒙手机已完成 32 KB 双向自检，大文件与长期稳定性待验收 |
 | 锁屏手机后台常驻、投屏、通知镜像、Wi-Fi Direct/AWDL | 仍未实现 |
 
-早期真机记录来自 Mac 与 Mate 70 Pro+ / HarmonyOS 6，保留在[验证记录](docs/VERIFICATION.md)和[蓝牙记录](docs/BLUETOOTH.md)。它们不能证明 Windows 端已通过真机验证。
+2026-10-27 已在 Windows 完成官方鸿蒙签名构建、Mate 70 Pro+ 覆盖安装、扫码配对、局域网文件接收回执与 BLE 小文件双向校验，详见 [Windows 验证记录](docs/WINDOWS-VERIFICATION.md)。早期 Mac 真机记录保留在[历史验证记录](docs/VERIFICATION.md)和[蓝牙记录](docs/BLUETOOTH.md)。
 
 ## 在 Windows 开始
 

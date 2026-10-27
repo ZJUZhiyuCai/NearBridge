@@ -26,6 +26,7 @@ export function harmonyToolchain({ platform = process.platform, env = process.en
   if (!app) throw new Error('请先安装华为官方 DevEco Studio，或设置 NEARBRIDGE_DEVECO_APP 为应用路径。');
   const contents = windows ? resolve(app) : resolve(app, 'Contents');
   const nodeHome = resolve(contents, 'tools/node');
+  const javaHome = resolve(contents, windows ? 'jbr' : 'jbr/Contents/Home');
   const node = [resolve(nodeHome, windows ? 'node.exe' : 'bin/node'), resolve(nodeHome, 'bin/node.exe')].find(existsSync);
   if (!node) throw new Error('DevEco Studio 内置 Node.js 不存在，请检查 NEARBRIDGE_DEVECO_APP。');
   const pathKey = Object.keys(env).find(key => key.toUpperCase() === 'PATH') || 'PATH';
@@ -35,7 +36,8 @@ export function harmonyToolchain({ platform = process.platform, env = process.en
     env: { ...env, NODE_HOME: nodeHome,
       DEVECO_CLI_STUDIO_PATH: app, DEVECO_CLI_DISABLE_TELEMETRY: '1',
       DEVECO_SDK_HOME: env.DEVECO_SDK_HOME || resolve(contents, 'sdk'),
-      JAVA_HOME: resolve(contents, windows ? 'jbr' : 'jbr/Contents/Home'),
-      [pathKey]: [nodeHome, resolve(nodeHome, 'bin'), resolve(contents, 'tools/ohpm/bin'), env[pathKey] || ''].join(windows ? ';' : delimiter) },
+      JAVA_HOME: javaHome,
+      // PackageHap invokes java by name, even when JAVA_HOME is present.
+      [pathKey]: [nodeHome, resolve(nodeHome, 'bin'), resolve(javaHome, 'bin'), resolve(contents, 'tools/ohpm/bin'), env[pathKey] || ''].join(windows ? ';' : delimiter) },
   };
 }

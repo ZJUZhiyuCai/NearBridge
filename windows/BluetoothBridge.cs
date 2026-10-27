@@ -59,7 +59,19 @@ internal sealed class BluetoothBridge : IAsyncDisposable
     {
         if (sender != provider || !enabled) return;
         if (args.Status == GattServiceProviderAdvertisementStatus.Started) Status?.Invoke("蓝牙已就绪 · 等待手机连接", true);
-        else if (args.Status == GattServiceProviderAdvertisementStatus.Aborted) { await Stop(); Status?.Invoke("Windows 蓝牙广播失败：" + args.Error + "，请检查蓝牙开关和驱动", false); }
+        else if (args.Status == GattServiceProviderAdvertisementStatus.StartedWithoutAllAdvertisementData)
+            Status?.Invoke("蓝牙已启动 · 广播信息不完整，手机可能暂时找不到此电脑", true);
+        else if (args.Status == GattServiceProviderAdvertisementStatus.Aborted)
+        {
+            // Some Windows drivers report Aborted/Success immediately before
+            // Started. Stopping here cancels an otherwise successful start.
+            var error = args.Error;
+            await Task.Delay(750);
+            if (sender != provider || !enabled || sender.AdvertisementStatus != GattServiceProviderAdvertisementStatus.Aborted) return;
+            await Stop();
+            var reason = error == BluetoothError.Success ? "系统未能持续发布服务" : error.ToString();
+            Status?.Invoke("Windows 蓝牙广播失败：" + reason + "，请重试或检查蓝牙开关和驱动", false);
+        }
     }
 
     async void OnSubscribers(GattLocalCharacteristic sender, object args)

@@ -8,7 +8,7 @@
 
 Windows 进入“设备连接”，手机扫原生二维码，再在电脑允许。自动/仅蓝牙/仅局域网及可靠操作逻辑不变；Windows 蓝牙从窗口顶部开启，附近列表可能显示 Windows 系统设备名。
 
-本次 Windows 环境未安装 DevEco Studio，未生成新签名 HAP，也未完成 Windows ↔ 鸿蒙真机回归。以下 Mac 说明与验证记录作为历史保留；Windows 使用以 [Windows 说明](../windows/README.md) 为准。
+2026-10-27 已使用 Windows 版 DevEco Studio 26.0.0.851 / SDK 26.0.0.105 完成官方签名、构建，并覆盖安装到 Mate 70 Pro+（API 26），核对版本为 0.7.0 / 700。Windows 扫码配对、局域网文件接收回执与 BLE 32 KB 双向自检已有真机证据，见 [Windows 验证记录](../docs/WINDOWS-VERIFICATION.md)。以下 Mac 说明与验证记录作为历史保留；Windows 使用以 [Windows 说明](../windows/README.md) 为准。
 
 目标设备：Mate 70 Pro+，最低兼容 HarmonyOS 6 / API 20。此目录为 Stage 模型 ArkTS 工程，含主 UIAbility 和系统 ShareExtensionAbility。当时源码为 **0.5.0 / 500**；新版真机回归仍待进行。2026-10-26 安装并通过扫码、工作流、自动收件、图库分享和 BLE 小文件验证的是 **0.2 基线**，不能视作 0.5 已验收。
 

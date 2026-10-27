@@ -56,6 +56,8 @@ test('Harmony toolchain locates Windows SDK paths with spaces without overwritin
   assert.equal(tc.env.DEVECO_SDK_HOME, 'custom-sdk');
   assert.ok(tc.env.Path.endsWith(';original')); assert.equal(tc.env.PATH, undefined);
   assert.equal(tc.env.JAVA_HOME, path.join(directory, 'jbr'));
+  // Hvigor's PackageHap launches java by name instead of using JAVA_HOME.
+  assert.ok(tc.env.Path.split(';').includes(path.join(tc.env.JAVA_HOME, 'bin')));
 });
 const app = fileURLToPath(new URL('../dist/windows/NearBridge.exe', import.meta.url));
 const nativeSkip = process.platform !== 'win32' || !fs.existsSync(app);
