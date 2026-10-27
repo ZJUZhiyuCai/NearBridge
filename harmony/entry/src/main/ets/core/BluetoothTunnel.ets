@@ -75,7 +75,7 @@ export class BluetoothTunnel {
 
   static async nearbyDevices(context: common.UIAbilityContext): Promise<BluetoothPeer[]> {
     const result = await abilityAccessCtrl.createAtManager().requestPermissionsFromUser(context, ['ohos.permission.ACCESS_BLUETOOTH']);
-    if (result.authResults[0] !== 0) throw new Error('需要允许蓝牙权限才能连接 Mac');
+    if (result.authResults[0] !== 0) throw new Error('需要允许蓝牙权限才能连接电脑');
     return BluetoothTunnel.scan();
   }
   private static async scan(preferredId: string = '', owner?: BluetoothTunnel): Promise<BluetoothPeer[]> {
@@ -87,7 +87,7 @@ export class BluetoothTunnel {
     if (owner) owner.cancelScan = finish;
     scanner.on('BLEDeviceFind', (report: ble.ScanReport) => {
       for (const result of report.scanResult) {
-        if (result.connectable) peers.set(result.deviceId, { id: result.deviceId, name: result.deviceName || 'NearBridge Mac' });
+        if (result.connectable) peers.set(result.deviceId, { id: result.deviceId, name: result.deviceName || 'NearBridge 电脑' });
       }
       if (preferredId && peers.has(preferredId)) finish();
     });
@@ -149,7 +149,7 @@ export class BluetoothTunnel {
           connected = true; resolve();
         } else if (event.state === constant.ProfileConnectionState.STATE_DISCONNECTED) {
           if (!connected) reject(new Error('蓝牙连接已断开'));
-          else this.breakLink(new Error('Mac 蓝牙连接已断开'));
+          else this.breakLink(new Error('电脑蓝牙连接已断开'));
         }
       });
       try { gatt.connect(); } catch (error) { reject(error as Error); }
@@ -164,7 +164,7 @@ export class BluetoothTunnel {
     BluetoothTunnel.lastError = '';
     let gatt: ble.GattClientDevice;
     try {
-      if (!preferredId) throw new Error('尚未选择蓝牙 Mac');
+      if (!preferredId) throw new Error('尚未选择蓝牙电脑');
       BluetoothTunnel.trace('BLE reconnecting to remembered device');
       gatt = await this.connect(preferredId, generation, 4500);
     } catch (_) {
@@ -174,7 +174,7 @@ export class BluetoothTunnel {
       this.check(generation);
       let peer = peers.find((value: BluetoothPeer) => value.id === preferredId);
       if (!peer && peers.length === 1) peer = peers[0];
-      if (!peer) throw new Error(peers.length ? '发现多台 Mac，请在连接设置重新选择' : '未发现 Mac，请开启 Mac NearBridge 的蓝牙通道');
+      if (!peer) throw new Error(peers.length ? '发现多台电脑，请在连接设置重新选择' : '未发现电脑，请开启电脑 NearBridge 的蓝牙通道');
       gatt = await this.connect(peer.id, generation, 12000);
     }
     BluetoothTunnel.trace('BLE discovering GATT services');
@@ -183,7 +183,7 @@ export class BluetoothTunnel {
     const service = services.find((value: ble.GattService) => value.serviceUuid.toLowerCase() === SERVICE_ID);
     const rx = service?.characteristics.find((value: ble.BLECharacteristic) => value.characteristicUuid.toLowerCase() === RECEIVE_ID);
     const tx = service?.characteristics.find((value: ble.BLECharacteristic) => value.characteristicUuid.toLowerCase() === TRANSMIT_ID);
-    if (!rx || !tx) throw new Error('Mac 蓝牙服务版本不匹配');
+    if (!rx || !tx) throw new Error('电脑蓝牙服务版本不匹配');
     BluetoothTunnel.trace('BLE GATT services found');
     try { this.mtu = await this.deadline(gatt.setBLEMtu(517), '协商传输大小', generation); } catch (_) { this.check(generation); this.mtu = 23; }
     BluetoothTunnel.trace(`BLE subscribing, MTU=${this.mtu}`);

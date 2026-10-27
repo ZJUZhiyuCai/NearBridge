@@ -9,7 +9,7 @@ struct SharePage {
   @LocalStorageLink('shareJSON') private shareJSON: string = '[]';
   @LocalStorageLink('shareError') private shareError: string = '';
   @StorageLink('paired') private paired: boolean = false;
-  @StorageLink('macName') private macName: string = '我的 Mac';
+  @StorageLink('macName') private macName: string = '我的电脑';
   @StorageLink('progress') private progress: string = '';
   @StorageLink('useBluetooth') private useBluetooth: boolean = false;
   @StorageProp('nbDark') private dark: boolean = false;
@@ -95,7 +95,7 @@ struct SharePage {
     if (this.paused) return '继续发送';
     if (this.shareError && this.completed > 0) return '继续发送';
     if (this.shareError) return '重试';
-    return '发送到 Mac';
+    return '发送到电脑';
   }
   private canSend(): boolean { return !this.busy && !this.finished && this.records().length > 0; }
 
@@ -177,7 +177,7 @@ struct SharePage {
 
       // 状态
       if (!this.paired) {
-        this.notice(this.c().warn, '还没连接 Mac', '先打开 NearBridge，扫描 Mac 上的配对码。配对后就能从这里直接发送。')
+        this.notice(this.c().warn, '还没连接电脑', '先打开 NearBridge，扫描电脑上的配对码。配对后就能从这里直接发送。')
       } else if (this.finished) {
         Column({ space: 10 }) {
           Column() {
@@ -186,10 +186,10 @@ struct SharePage {
           .width(72).height(72).borderRadius(36).justifyContent(FlexAlign.Center)
           .linearGradient({ angle: 160, colors: [[TINT_TOP, 0.0], [TINT_BOTTOM, 1.0]] })
           .shadow({ radius: 18, color: '#400A6CFF', offsetY: 6 })
-          Text('已存入 Mac').fontSize(22).fontWeight(FontWeight.Bold).fontColor(this.c().text)
+          Text('已存入电脑').fontSize(22).fontWeight(FontWeight.Bold).fontColor(this.c().text)
           Text(this.records().some((record: ShareRecord) => this.isFile(record))
-            ? '文件在 Mac 收件目录中，文字在 NearBridge 互传页中。'
-            : '在 Mac 的 NearBridge 互传页里查看文字和链接。').fontSize(13).fontColor(this.c().text2)
+            ? '文件在电脑收件目录中，文字在 NearBridge 收发页中。'
+            : '在电脑的 NearBridge 收发页里查看文字和链接。').fontSize(13).fontColor(this.c().text2)
         }
         .width('100%')
         .margin({ top: 32 })

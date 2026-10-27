@@ -1,5 +1,11 @@
 # Test matrix
 
+## Windows 0.7 coverage
+
+Run npm run build:windows before npm test. Windows CI does this automatically with .NET 10 and Node 24. Additional tests cover reserved filenames, shortcut ID allowlisting, literal PowerShell inputs, Windows DevEco discovery, atomic delta merging, the compiled C# BLE codec, bounded ZIP packaging and damaged journals. A fault-injecting HTTP fixture runs the compiled Windows client, drops action/chunk replies and verifies identical action IDs plus correct file offsets after client restart.
+
+Windows build and local service/client tests were run on 2026-10-27: 89 passed and two Swift-only tests skipped. The installed WebView2 client and Bluetooth controls were exercised. Official Windows DevEco 26.0.0.851 / SDK 26.0.0.105 compiled and signed 0.7.0, which was cover-installed on Mate 70 Pro+ / API 26. Real-device evidence covers native pairing, a LAN file receipt, and the BLE 32 KB round-trip check (Windows file/hash verified; phone completion confirmed by the owner). Fixes address transient Windows GATT startup events and Java lookup during HAP packaging. See [Windows verification](WINDOWS-VERIFICATION.md) for exact evidence and remaining limits; no throughput or full hardware-failure acceptance is claimed. Earlier Mac evidence below remains historical.
+
 Automated checks run against synthetic data in temporary directories. Hardware evidence is tracked separately so a passing CI run cannot be mistaken for phone validation.
 
 | Check | Command / environment | What it establishes |

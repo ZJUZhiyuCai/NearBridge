@@ -1,5 +1,7 @@
 node_modules/
 dist/
+windows/bin/
+windows/obj/
 .runtime/
 .DS_Store
 *.log

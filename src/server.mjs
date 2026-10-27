@@ -14,7 +14,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import QRCode from "qrcode";
 import { Store } from "./store.mjs";
-import { macSystem } from "./system.mjs";
+import { desktopSystem } from "./system.mjs";
 import { WorkflowManager } from "./workflows.mjs";
 import { TransferManager } from "./transfers.mjs";
 import { VERSION } from "./version.mjs";
@@ -66,10 +66,10 @@ export function createBridge(options) {
     inbox,
     tls,
     addresses = [],
-    name = "我的 Mac",
+    name = "我的电脑",
     maxFileSize = 512 * 1024 * 1024,
     maxStorage = 2 * 1024 * 1024 * 1024,
-    system = macSystem,
+    system = desktopSystem,
   } = options;
   if (!tls?.key || !tls?.cert) throw new Error("手机连接必须使用 TLS");
   const store = new Store(dataDir, inbox);
@@ -125,7 +125,7 @@ export function createBridge(options) {
   }
 
   function requireMac(role) {
-    if (role !== "mac") throw fail(403, "只能在 Mac 上操作");
+    if (role !== "mac") throw fail(403, "只能在电脑上操作");
   }
   function deviceFor(req) {
     const cookie = String(req.headers.cookie || "")
@@ -149,9 +149,9 @@ export function createBridge(options) {
   }
   function hasRoom(size = 0) {
     if (store.data.items.length + uploads.size + transfers.count >= 1000)
-      throw fail(507, "收件箱已满，请在 Mac 删除不需要的记录后重试");
+      throw fail(507, "收件箱已满，请在电脑删除不需要的记录后重试");
     if (store.bytes + reservedBytes + transfers.bytes + size > maxStorage)
-      throw fail(507, "暂存空间已满，请在 Mac 删除不需要的文件后重试");
+      throw fail(507, "暂存空间已满，请在电脑删除不需要的文件后重试");
   }
   function validatedText(value) {
     if (typeof value !== "string" || !value.trim())
@@ -223,6 +223,7 @@ export function createBridge(options) {
     if (method === "OPTIONS") throw fail(403, "不接受跨站请求");
     const staticFiles = {
       "/": ["index.html", "text/html"],
+      "/state-update.js": ["state-update.js", "text/javascript"],
       "/app.js": ["app.js", "text/javascript"],
       "/style.css": ["style.css", "text/css"],
       "/icon.svg": ["icon.svg", "image/svg+xml"],
@@ -282,7 +283,7 @@ export function createBridge(options) {
         store.data.device.expiresAt > now &&
         !(native && pairing.native)
       )
-        throw fail(409, "这台 Mac 已有配对手机，请先在 Mac 解除配对");
+        throw fail(409, "这台电脑已有配对手机，请先在电脑解除配对");
       if (pairing.native && !native)
         throw fail(400, "请使用 NearBridge 原生客户端扫描此二维码");
       if (
@@ -291,7 +292,7 @@ export function createBridge(options) {
         typeof body.token !== "string" ||
         !equal(body.token, pairing.token)
       )
-        throw fail(401, "二维码已过期，请在 Mac 刷新后重新扫码");
+        throw fail(401, "二维码已过期，请在电脑刷新后重新扫码");
       const claim = token();
       pending = {
         id: randomUUID(),
@@ -337,7 +338,7 @@ export function createBridge(options) {
       return;
     }
     if (role === "phone" && !device)
-      throw fail(401, "请先扫描 Mac 上的二维码配对");
+      throw fail(401, "请先扫描电脑上的二维码配对");
 
     const authorize = () => {
       if (closing) throw fail(503, "服务正在重启，请稍后重试");
@@ -540,6 +541,7 @@ export function createBridge(options) {
     if (method === "POST" && pathname === "/api/pairing/native") {
       requireMac(role);
       if (!addresses.length) throw fail(409, "请先连接 Wi-Fi");
+      const selected = addresses.find(value => value.ip === url.searchParams.get("ip")) || addresses[0];
       pairing = {
         token: token(),
         expiresAt: Date.now() + PAIR_MS,
@@ -555,13 +557,14 @@ export function createBridge(options) {
         protocol: "nearbridge",
         version: 2,
         name,
-        url: `https://${addresses[0].ip}:${nativePort || remotePort}`,
+        url: `https://${selected.ip}:${nativePort || remotePort}`,
         token: pairing.token,
         certificate: ca.raw.toString("base64"),
         publicKeyHash: pin,
       });
       json(res, 200, {
         expiresAt: pairing.expiresAt,
+        url: `https://${selected.ip}:${nativePort || remotePort}`,
         fingerprint: certificate.fingerprint256,
         qr: await QRCode.toDataURL(payload, {
           width: 660,
@@ -732,7 +735,7 @@ export function createBridge(options) {
       if (!accessible(item, role, device) || item.kind !== "file")
         throw fail(404, "文件不存在");
       const file = store.filePath(item);
-      if (!fs.existsSync(file)) throw fail(410, "文件已从 Mac 移动或删除");
+      if (!fs.existsSync(file)) throw fail(410, "文件已从电脑移动或删除");
       const size = fs.statSync(file).size;
       let start = 0,
         end = size - 1;
@@ -793,6 +796,15 @@ export function createBridge(options) {
       );
       if (!item) throw fail(404, "文字记录不存在");
       await system.writeClipboard(item.text);
+      json(res, 200, { ok: true });
+      return;
+    }
+    if (method === "POST" && pathname === "/api/mac/reveal-file") {
+      requireMac(role);
+      const body = await readJSON(req);
+      const item = store.data.items.find(value => value.id === body.id && value.kind === "file");
+      if (!item) throw fail(404, "文件不存在");
+      await system.openInbox(path.dirname(store.filePath(item)));
       json(res, 200, { ok: true });
       return;
     }

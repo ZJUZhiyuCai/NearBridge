@@ -1,5 +1,11 @@
 # Architecture
 
+## Windows desktop (0.7)
+
+Windows is now the primary desktop. windows/BridgeWindow.cs hosts the existing local UI in WebView2 and supplies the tray, hotkey, pickers and per-user Send To IPC. windows/BridgeClient.cs owns durable action/upload journals; windows/BluetoothBridge.cs replaces CoreBluetooth with Windows GATT. Both transports reach the same Node service and phone TLS endpoint.
+
+The mac role/source and /api/mac/* paths remain compatibility identifiers for either desktop. Windows uses fixed PowerShell source with JSON stdin, LocalAppData and locally resolved .lnk workflow IDs. src/discovery.mjs publishes _nearbridge._tcp on Windows; the Mac host retains its publisher. POSIX modes are not Windows ACL guarantees. The following original architecture and protocol flows also apply to Windows with these platform adapters.
+
 NearBridge has two native clients and one local service. All user data stays on the paired devices; no relay service is involved.
 
 ```mermaid

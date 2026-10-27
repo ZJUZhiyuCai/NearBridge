@@ -68,7 +68,7 @@ export class BridgeClient {
           typeof pending.scope !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(pending.requestId) || !Number.isSafeInteger(pending.requestedAt))) throw new Error('待确认记录无效');
         this.pendingAction = pending;
       }
-    } catch (_) { this.actionStorageError = '无法读取待确认操作；请先检查 Mac 的结果，再结束重试'; }
+    } catch (_) { this.actionStorageError = '无法读取待确认操作；请先检查电脑的结果，再结束重试'; }
     this.publishPendingAction();
     try { this.saved = JSON.parse(fs.readTextSync(`${this.directory}/saved.json`)) as SavedFile[]; } catch (_) {}
     try { this.sendJobs = JSON.parse(fs.readTextSync(`${this.directory}/outgoing.json`)) as SendJob[]; } catch (_) {}
@@ -90,8 +90,8 @@ export class BridgeClient {
     AppStorage.setOrCreate('bluetoothName', this.bluetooth.name);
     AppStorage.setOrCreate('bluetoothCheck', '');
     AppStorage.setOrCreate('paired', this.paired !== undefined && this.paired.session !== '');
-    AppStorage.setOrCreate('macName', this.paired?.name || '我的 Mac');
-    AppStorage.setOrCreate('status', this.paired ? '正在连接 Mac…' : '扫码连接你的 Mac');
+    AppStorage.setOrCreate('macName', this.paired?.name || '我的电脑');
+    AppStorage.setOrCreate('status', this.paired ? '正在连接电脑…' : '扫码连接你的电脑');
     AppStorage.setOrCreate('linkPhase', this.paired?.session ? 'connecting' : 'offline');
     AppStorage.setOrCreate('progress', '');
     AppStorage.setOrCreate('progressFraction', -1);
@@ -121,7 +121,7 @@ export class BridgeClient {
   private persistPair(): void {
     if (this.paired) this.write('paired.json', JSON.stringify(this.paired));
     AppStorage.setOrCreate('paired', this.paired !== undefined && this.paired.session !== '');
-    AppStorage.setOrCreate('macName', this.paired?.name || '我的 Mac');
+    AppStorage.setOrCreate('macName', this.paired?.name || '我的电脑');
   }
   private async request(route: string, method: http.RequestMethod = http.RequestMethod.GET, body?: string | ArrayBuffer,
     extraHeaders: Record<string, string> = {}, origin: string = '', anonymous: boolean = false): Promise<http.HttpResponse> {
@@ -133,7 +133,7 @@ export class BridgeClient {
     if (bluetooth) await BluetoothTunnel.shared.ensure(this.bluetooth.id);
     if (epoch !== this.connectionEpoch) throw new Error('连接方式已切换或应用已暂停');
     const base = bluetooth ? BLUETOOTH_URL : (origin || pair.url);
-    if (!bluetooth && !PRIVATE_URL.test(base)) throw new Error('只允许局域网内的 Mac 地址');
+    if (!bluetooth && !PRIVATE_URL.test(base)) throw new Error('只允许局域网内的电脑地址');
     const headers: Record<string, string> = { 'X-NearBridge': '1' };
     for (const name of Object.keys(extraHeaders)) headers[name] = extraHeaders[name];
     if (pair.session && !anonymous) headers['Authorization'] = `Bearer ${pair.session}`;
@@ -153,7 +153,7 @@ export class BridgeClient {
       if (response.responseCode < 200 || response.responseCode >= 300) {
         if (response.responseCode === 401 && pair.session && !anonymous) this.sessionRejected = true;
         const decoded = this.decode(response);
-        let message = `Mac 返回 ${response.responseCode}`;
+        let message = `电脑返回 ${response.responseCode}`;
         try { message = (JSON.parse(decoded) as ErrorReply).error || message; } catch (_) {}
         throw new RequestFailure(response.responseCode, message);
       }
@@ -187,21 +187,21 @@ export class BridgeClient {
     const data = JSON.parse(raw) as PairingPayload;
     if (data.protocol !== 'nearbridge' || data.version !== 2 || !PRIVATE_URL.test(data.url) ||
       !/^[A-Za-z0-9_-]{43}$/.test(data.token) || !/^[A-Za-z0-9+/]{43}=$/.test(data.publicKeyHash) ||
-      !/^[A-Za-z0-9+/=]{300,6000}$/.test(data.certificate)) throw new Error('请扫描 Mac 原生窗口中的配对码');
+      !/^[A-Za-z0-9+/=]{300,6000}$/.test(data.certificate)) throw new Error('请扫描电脑原生窗口中的配对码');
     const previous = this.paired;
     const previousBluetooth = this.bluetooth;
     const previousMode = this.connectionMode;
     let previousRoot = '';
     try { previousRoot = fs.readTextSync(`${this.directory}/root.pem`); } catch (_) {}
     this.stop();
-    // A QR code identifies the new Mac's LAN endpoint. An old BLE selection
+    // A QR code identifies the new 电脑's LAN endpoint. An old BLE selection
     // belongs to the previous pairing and must not intercept this handshake.
     this.bluetooth = { enabled: false, id: '', name: '', transport: 'ble-v1' };
     this.connectionMode = 'lan'; this.state = undefined;
     this.paired = { actionScope: util.generateRandomUUID(true), name: data.name, url: data.url, session: '', certificate: data.certificate, publicKeyHash: data.publicKeyHash };
     const lines = data.certificate.match(/.{1,64}/g) || [];
     this.write('root.pem', `-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----\n`);
-    AppStorage.setOrCreate('status', '请在 Mac 确认配对请求');
+    AppStorage.setOrCreate('status', '请在电脑确认配对请求');
     AppStorage.setOrCreate('linkPhase', 'waitingApproval');
     try {
       const claim = await this.json<PairClaim>('/api/pair', http.RequestMethod.POST,
@@ -209,7 +209,7 @@ export class BridgeClient {
       const deadline = Date.now() + 5 * 60000;
       while (Date.now() < deadline) {
         const result = await this.json<PairStatus>(`/api/pair/status?id=${claim.id}`, http.RequestMethod.GET, '', { 'X-Pair-Claim': claim.claim });
-        if (result.status === 'rejected') throw new Error('Mac 拒绝了本次配对');
+        if (result.status === 'rejected') throw new Error('电脑拒绝了本次配对');
         if (result.status === 'approved' && result.session) {
           this.paired.session = result.session;
           this.sessionRejected = false; this.connectionMode = 'auto'; this.bluetooth.mode = 'auto';
@@ -224,7 +224,7 @@ export class BridgeClient {
         }
         await new Promise<void>(resolve => setTimeout(resolve, 1200));
       }
-      throw new Error('配对已过期，请在 Mac 刷新二维码');
+      throw new Error('配对已过期，请在电脑刷新二维码');
     } catch (error) {
       this.paired = previous;
       this.bluetooth = previousBluetooth; this.connectionMode = previousMode;
@@ -348,7 +348,7 @@ export class BridgeClient {
       this.syncFailures = 0;
       // Keep the notification channel responsive while a file is being received.
       this.receivePending();
-      delay = this.revision ? 0 : 3000; // Compatibility with an older Mac build.
+      delay = this.revision ? 0 : 3000; // Compatibility with an older 电脑 build.
     } catch (error) {
       if (epoch === this.connectionEpoch && this.active) {
         this.revision = ''; // Bootstrap again after reconnect or a server rollback.
@@ -390,7 +390,7 @@ export class BridgeClient {
   }
   private connectionFailed(error: Error): void {
     AppStorage.setOrCreate('linkPhase', this.sessionRejected ? 'error' : 'offline');
-    AppStorage.setOrCreate('status', this.sessionRejected ? '连接授权已失效，请重新扫码连接 Mac' : `等待 Mac 连接 · ${error.message}`);
+    AppStorage.setOrCreate('status', this.sessionRejected ? '连接授权已失效，请重新扫码连接电脑' : `等待电脑连接 · ${error.message}`);
   }
   private discover(): void {
     if (this.connectionMode === 'bt' || !this.context || !this.paired || this.discovery || Date.now() - this.lastDiscovery < 15000) return;
@@ -426,7 +426,7 @@ export class BridgeClient {
   }
   private publishPendingAction(): void {
     const pending = this.pendingAction;
-    AppStorage.setOrCreate('pendingAction', this.actionStorageError || (pending ? (pending.scope !== this.paired?.actionScope ? '上一台 Mac 的操作结果尚未确认' :
+    AppStorage.setOrCreate('pendingAction', this.actionStorageError || (pending ? (pending.scope !== this.paired?.actionScope ? '上一台电脑的操作结果尚未确认' :
       (pending.kind === 'text' ? '文字发送结果尚未确认' : '快捷指令结果尚未确认')) : ''));
   }
   private saveAction(pending?: PendingAction): void {
@@ -449,16 +449,16 @@ export class BridgeClient {
   }
   discardPendingAction(): void {
     if (this.actionBusy) throw new Error('请等待当前操作完成');
-    this.saveAction(); // This only stops retries; it does not undo a Mac action.
+    this.saveAction(); // This only stops retries; it does not undo a 电脑 action.
   }
   private async performAction(kind: string, value: string): Promise<void> {
     if (this.actionBusy) throw new Error('正在确认上一项操作，请稍候');
     if (this.actionStorageError) throw new Error(this.actionStorageError);
     const pair = this.paired;
-    if (!pair?.session || !pair.actionScope) throw new Error('请先扫码配对 Mac');
+    if (!pair?.session || !pair.actionScope) throw new Error('请先扫码配对电脑');
     const pending = this.pendingAction;
     if (pending && (pending.scope !== pair.actionScope || pending.kind !== kind || pending.value !== value))
-      throw new Error('上一项操作的结果尚未确认，请先点“重试确认”，或检查 Mac 后结束重试');
+      throw new Error('上一项操作的结果尚未确认，请先点“重试确认”，或检查电脑后结束重试');
     const epoch = this.connectionEpoch;
     // Resolve the route before locking it for the whole action. Never replay a
     // mutation onto another transport while its original response is in flight.
@@ -468,7 +468,7 @@ export class BridgeClient {
     this.actionBusy = true;
     try {
       if (this.state?.capabilities?.reliableActions !== 1) await this.refresh();
-      if (this.state?.capabilities?.reliableActions !== 1) throw new Error('请先将 Mac NearBridge 更新到 0.6 或更高版本');
+      if (this.state?.capabilities?.reliableActions !== 1) throw new Error('请先将电脑 NearBridge 更新到 0.6 或更高版本');
       if (epoch !== this.connectionEpoch || pair !== this.paired) throw new Error('连接已改变，请重试');
       const action: PendingAction = pending || { requestId: util.generateRandomUUID(true), requestedAt: Date.now(), scope: pair.actionScope, kind: kind, value: value };
       if (!pending) this.saveAction(action); // Persist before sending any side effect.
@@ -478,7 +478,7 @@ export class BridgeClient {
       this.saveAction();
       await this.refreshAfterAction();
     } catch (error) {
-      if (this.pendingAction && !(error instanceof RequestFailure)) throw new Error('暂未收到 Mac 确认；点“重试确认”会继续同一项操作，不会重复发送或执行');
+      if (this.pendingAction && !(error instanceof RequestFailure)) throw new Error('暂未收到电脑确认；点“重试确认”会继续同一项操作，不会重复发送或执行');
       throw error as Error;
     } finally { this.actionBusy = false; }
   }
@@ -489,7 +489,7 @@ export class BridgeClient {
     const epoch = this.connectionEpoch;
     try { await this.refresh(); }
     catch (error) {
-      // The action already committed on the Mac. Reporting it as failed invites
+      // The action already committed on the 电脑. Reporting it as failed invites
       // duplicate sends or a second workflow execution when the user retries.
       if (epoch === this.connectionEpoch) {
         this.connectionFailed(error as Error);
@@ -557,7 +557,7 @@ export class BridgeClient {
         await this.json<Object>(`/api/transfers/${job.id}/complete`, http.RequestMethod.POST, '{}');
       }
       this.sendJobs = this.sendJobs.filter((value: SendJob) => value.id !== job.id); this.saveJobs();
-      this.reportProgress(progress, `${job.name} 已存入 Mac`, 1);
+      this.reportProgress(progress, `${job.name} 已存入电脑`, 1);
       completed = true;
       await this.refreshAfterAction();
     } finally {
@@ -707,7 +707,7 @@ export class BridgeClient {
     } finally { fs.closeSync(file); }
   }
   async checkBluetooth(): Promise<void> {
-    if (!this.bluetooth.enabled) throw new Error('请先选择蓝牙 Mac');
+    if (!this.bluetooth.enabled) throw new Error('请先选择蓝牙电脑');
     if (this.checkingBluetooth || this.sending) throw new Error('请等待当前传输完成');
     this.checkingBluetooth = true; this.holdScreen(1);
     const id = util.generateRandomUUID(true);
@@ -727,7 +727,7 @@ export class BridgeClient {
       await this.sendFile(path, name); uploaded = true;
       const state = await this.json<BridgeState>('/api/state');
       const item = state.items.find((value: BridgeItem) => value.source === 'phone' && value.name === name);
-      if (!item || item.size !== bytes.byteLength || item.sha256 !== expected) throw new Error('Mac 收到的测试文件校验不一致');
+      if (!item || item.size !== bytes.byteLength || item.sha256 !== expected) throw new Error('电脑收到的测试文件校验不一致');
       const reply = await this.request(`/api/files/${item.id}`, http.RequestMethod.GET, undefined,
         { 'Range': `bytes=0-${bytes.byteLength - 1}` });
       const body = reply.result as ArrayBuffer;
@@ -786,17 +786,17 @@ export class BridgeClient {
   }
   async setConnectionMode(mode: string): Promise<void> {
     if (!['auto', 'bt', 'lan'].includes(mode)) throw new Error('连接方式无效');
-    if (mode === 'bt' && !this.bluetooth.id) throw new Error('请先选择蓝牙 Mac');
+    if (mode === 'bt' && !this.bluetooth.id) throw new Error('请先选择蓝牙电脑');
     if (this.actionBusy || this.sending || this.receiving.size || this.checkingBluetooth) throw new Error('正在传输，请完成或暂停后切换连接方式');
     const settings: BluetoothSettings = { enabled: mode === 'bt', id: this.bluetooth.id, name: this.bluetooth.name, transport: 'ble-v1', mode: mode };
     this.write('bluetooth.json', JSON.stringify(settings));
     this.stop(); this.bluetooth = settings; this.connectionMode = mode;
     BluetoothTunnel.shared.retry();
     AppStorage.setOrCreate('connectionMode', mode); AppStorage.setOrCreate('useBluetooth', settings.enabled);
-    AppStorage.setOrCreate('status', '正在连接 Mac…'); this.start();
+    AppStorage.setOrCreate('status', '正在连接电脑…'); this.start();
   }
   async useBluetoothDevice(id: string, name: string, automatic: boolean = false): Promise<void> {
-    if (!this.paired?.session) throw new Error('请先扫码配对 Mac');
+    if (!this.paired?.session) throw new Error('请先扫码配对电脑');
     if (!/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(id)) throw new Error('蓝牙设备地址无效');
     if (this.actionBusy || this.sending || this.receiving.size || this.checkingBluetooth) throw new Error('请等待当前传输完成');
     const settings: BluetoothSettings = { enabled: !automatic, id: id, name: name.slice(0, 80), transport: 'ble-v1', mode: automatic ? 'auto' : 'bt' };
@@ -805,7 +805,7 @@ export class BridgeClient {
     BluetoothTunnel.shared.retry();
     AppStorage.setOrCreate('connectionMode', this.connectionMode);
     AppStorage.setOrCreate('useBluetooth', settings.enabled); AppStorage.setOrCreate('bluetoothName', settings.name);
-    AppStorage.setOrCreate('status', '正在连接 Mac…');
+    AppStorage.setOrCreate('status', '正在连接电脑…');
     AppStorage.setOrCreate('linkPhase', 'connecting');
     const epoch = this.connectionEpoch;
     try { await this.refresh(); } finally { if (epoch === this.connectionEpoch) this.start(); }
@@ -814,7 +814,7 @@ export class BridgeClient {
   async retryBluetooth(): Promise<void> {
     if (this.actionBusy || this.sending || this.receiving.size || this.checkingBluetooth) throw new Error('请等待当前传输完成');
     this.stop(); BluetoothTunnel.shared.retry();
-    AppStorage.setOrCreate('status', '正在重新连接 Mac…');
+    AppStorage.setOrCreate('status', '正在重新连接电脑…');
     AppStorage.setOrCreate('linkPhase', 'connecting');
     const epoch = this.connectionEpoch;
     try { await this.refresh(); } finally { if (epoch === this.connectionEpoch) this.start(); }

@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { X509Certificate } from "node:crypto";
+import { opensslExecutable } from "./platform.mjs";
 
 export function localAddresses() {
   const result = [];
@@ -53,7 +54,7 @@ export function ensureCertificate(directory, addresses) {
       { mode: 0o600 },
     );
     execFileSync(
-      "/usr/bin/openssl",
+      opensslExecutable(),
       [
         "req",
         "-x509",
@@ -70,7 +71,7 @@ export function ensureCertificate(directory, addresses) {
         "-config",
         config,
       ],
-      { stdio: "pipe" },
+      { stdio: "pipe", windowsHide: true },
     );
     fs.chmodSync(keyFile, 0o600);
     fs.rmSync(config);
@@ -92,7 +93,7 @@ export function ensureNativeCertificate(directory, addresses) {
   const key = path.join(directory, "server-key.pem");
   const cert = path.join(directory, "server-cert.pem");
   const run = (args) =>
-    execFileSync("/usr/bin/openssl", args, { stdio: "pipe" });
+    execFileSync(opensslExecutable(), args, { stdio: "pipe", windowsHide: true });
   if (!fs.existsSync(rootKey) || !fs.existsSync(rootCert)) {
     const config = path.join(directory, "root.cnf");
     fs.writeFileSync(

@@ -1,3 +1,6 @@
+import { mergeState } from './state-update.js';
+const nativeWindows = Boolean(window.nearBridgeWindows && window.chrome?.webview);
+const nativePost = message => window.chrome.webview.postMessage(message);
 const $ = (id) => document.getElementById(id);
 const all = (selector) => [...document.querySelectorAll(selector)];
 let role = "mac";
@@ -161,7 +164,7 @@ function makeButton(label, action, className = "") {
 async function copyItem(item) {
   if (role === "mac") {
     await post("/api/mac/clipboard/copy", { id: item.id });
-    toast("已复制到 Mac 剪贴板");
+    toast("已复制到电脑剪贴板");
     return;
   }
   try {
@@ -213,11 +216,13 @@ function renderHistory() {
     direction.textContent =
       item.source === role
         ? role === "mac"
-          ? item.peerId
+          ? item.receivedAt
+            ? "发出 · 手机已收取"
+            : item.peerId
             ? "发出 · 手机可取用"
             : "暂存 · 待手机配对"
-          : "发出 · 已保存到 Mac"
-        : `收到 · 来自${item.source === "mac" ? " Mac" : "手机"}`;
+          : "发出 · 已保存到电脑"
+        : `收到 · 来自${item.source === "mac" ? " 电脑" : "手机"}`;
     const date = document.createElement("span");
     date.textContent = timestamp(item.createdAt);
     meta.append(direction, date);
@@ -254,11 +259,14 @@ function renderHistory() {
         }
       }
     } else {
+      if (nativeWindows) actions.append(makeButton("所在目录", () => post("/api/mac/reveal-file", { id: item.id })));
+      else {
       const download = document.createElement("a");
       download.textContent = "下载";
       download.href = `/api/files/${item.id}`;
       download.download = item.name;
       actions.append(download);
+      }
     }
     if (role === "mac") {
       const remove = makeButton(
@@ -295,6 +303,10 @@ async function refreshState() {
   const sequence = ++stateSequence;
   const data = await api("/api/state");
   if (sequence !== stateSequence) return;
+  renderState(mergeState(snapshot, { revision: data.revision, state: data }));
+}
+function renderState(data) {
+  document.querySelector('.sidebar-bottom small').textContent = `本地运行 · v${data.version}`;
   const previous = snapshot;
   snapshot = data;
   $("recipient").textContent =
@@ -320,7 +332,8 @@ async function refreshState() {
   $("paired-summary").textContent = data.paired
     ? `已配对：${data.device.name}。手机可以收藏连接页面；更换手机时请先在偏好设置中解除配对。`
     : "";
-  $("refresh-pairing").disabled = data.paired;
+  $("refresh-pairing").disabled = data.paired || (nativeWindows && Boolean(data.pending));
+  if (nativeWindows) $("network-select").disabled = Boolean(data.pending);
   $("pending-pairing").hidden = !data.pending;
   $("pair-banner").hidden = !data.pending || currentView === "pairing";
   if (data.pending) {
@@ -347,7 +360,7 @@ async function refreshState() {
     `单个文件最高 ${bytes(data.limits.maxFileSize)}`;
   setConnection(
     role === "phone"
-      ? "已连接 Mac"
+      ? "已连接电脑"
       : data.device?.connected
         ? "手机已连接"
         : data.paired
@@ -366,7 +379,7 @@ function renderWorkflows() {
       ? `${snapshot.name} · 可执行`
       : snapshot.device?.connected
         ? `${snapshot.device.name} 已连接，可从手机触发`
-        : "可以先在 Mac 试运行，再连接手机";
+        : "可以先在电脑试运行，再连接手机";
   $("workflow-dot").classList.toggle(
     "online",
     role === "phone" || Boolean(snapshot.device?.connected),
@@ -413,6 +426,7 @@ function renderWorkflows() {
     const run = makeButton(
       role === "mac" ? "试运行 ▷" : "运行 ▷",
       async () => {
+        if (nativeWindows) { nativePost({ type: "workflow", id: workflow.id }); return; }
         const requestId = crypto.randomUUID
           ? crypto.randomUUID()
           : Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) =>
@@ -420,7 +434,7 @@ function renderWorkflows() {
             ).join("");
         await post(`/api/workflows/${workflow.id}/run`, { requestId });
         await refreshState();
-        toast("请求已交给 Mac，执行结果会显示在下方");
+        toast("请求已交给电脑，执行结果会显示在下方");
       },
       "primary",
     );
@@ -436,7 +450,7 @@ function renderWorkflows() {
   if (!snapshot.workflows.length) {
     const empty = document.createElement("div");
     empty.className = "history-empty";
-    empty.textContent = "Mac 尚未启用工作流，请先在 Mac 面板选择。";
+    empty.textContent = "电脑尚未启用工作流，请先在电脑面板选择。";
     fragment.append(empty);
   }
   $("workflow-list").replaceChildren(fragment);
@@ -467,7 +481,7 @@ function renderWorkflows() {
   if (!snapshot.jobs.length) {
     const empty = document.createElement("div");
     empty.className = "history-empty";
-    empty.textContent = "还没有执行记录。点一个按钮，Mac 就会开始处理。";
+    empty.textContent = "还没有执行记录。点一个按钮，电脑就会开始处理。";
     jobs.append(empty);
   }
   $("workflow-jobs").replaceChildren(jobs);
@@ -488,8 +502,8 @@ $("load-shortcuts").addEventListener("click", async () => {
     );
     $("add-shortcut").disabled = !result.shortcuts.length;
     $("shortcut-hint").textContent = result.shortcuts.length
-      ? "加入后，已配对手机可以直接执行。指令自身的授权和确认仍由 macOS 处理。"
-      : "没有找到快捷指令。先在 Mac「快捷指令」App 创建，再重新载入。";
+      ? "加入后，已配对手机可以直接执行。指令自身的授权和确认仍由 Windows 处理。"
+      : nativeWindows ? "从窗口顶部打开“快捷方式目录”，放入 .lnk 快捷方式后重新载入。" : "没有找到快捷指令，请先在电脑配置后重新载入。";
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -502,7 +516,7 @@ $("add-shortcut").addEventListener("click", async () => {
     !name ||
     !(await confirmAction(
       "把这个快捷指令交给手机触发？",
-      `「${name}」加入后，配对手机点按就会在 Mac 执行。请先确认指令的具体作用，尤其是发送消息、删除文件或账户操作。`,
+      `「${name}」加入后，配对手机点按就会在电脑执行。请先确认指令的具体作用，尤其是发送消息、删除文件或账户操作。`,
       "加入面板",
     ))
   )
@@ -518,13 +532,18 @@ $("add-shortcut").addEventListener("click", async () => {
   }
 });
 
-async function loadPairing() {
+async function loadPairing(force = false) {
   if (role !== "mac" || pairLoading) return;
   pairLoading = true;
   try {
-    const data = await api(
+    let data = await api(
       `/api/pairing?ip=${encodeURIComponent($("network-select").value)}`,
     );
+    if (nativeWindows) {
+      if ((!pairInfo || force === true) && !snapshot?.paired && !snapshot?.pending)
+        data = { ...data, ...await post(`/api/pairing/native?ip=${encodeURIComponent($("network-select").value)}`) };
+      else data = { ...data, ...pairInfo, links: data.links };
+    }
     pairInfo = data;
     for (const id of ["mini-qr", "large-qr"]) {
       $(id).hidden = !data.qr || snapshot?.paired;
@@ -548,9 +567,9 @@ async function loadPairing() {
         : "未发现局域网地址，请连接 Wi-Fi 后重启 NearBridge。";
     $("fingerprint").textContent = data.fingerprint || "";
     $("mini-pair-caption").textContent = data.qr
-      ? "用手机扫描，连接这台 Mac"
+      ? "用手机扫描，连接这台电脑"
       : data.links.length
-        ? "手机已请求连接，请在 Mac 确认"
+        ? "手机已请求连接，请在电脑确认"
         : "连接 Wi-Fi 后重启，以生成二维码";
     renderPairExpiry();
   } catch (error) {
@@ -577,11 +596,11 @@ function renderPairExpiry() {
   }
 }
 setInterval(renderPairExpiry, 10000);
-$("network-select").addEventListener("change", loadPairing);
+$("network-select").addEventListener("change", () => loadPairing(true));
 $("refresh-pairing").addEventListener("click", async () => {
   try {
-    await post("/api/pairing/refresh");
-    await loadPairing();
+    if (!nativeWindows) await post("/api/pairing/refresh");
+    await loadPairing(true);
     toast("二维码已刷新");
   } catch (error) {
     toast(error.message, true);
@@ -620,7 +639,7 @@ $("revoke-device").addEventListener("click", async () => {
   if (
     !(await confirmAction(
       "解除手机配对？",
-      "手机将立即失去收发权限。现有文件和文字保留在 Mac；再次连接需要重新扫码。",
+      "手机将立即失去收发权限。现有文件和文字保留在电脑；再次连接需要重新扫码。",
       "解除配对",
     ))
   )
@@ -637,6 +656,7 @@ $("revoke-device").addEventListener("click", async () => {
 
 $("text-panel").addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (nativeWindows) { nativePost({ type: "text", text: $("message").value }); return; }
   const button = $("text-send");
   button.disabled = true;
   try {
@@ -644,10 +664,10 @@ $("text-panel").addEventListener("submit", async (event) => {
     $("message").value = "";
     toast(
       data.clipboardCopied
-        ? "已送到 Mac，并复制到剪贴板"
+        ? "已送到电脑，并复制到剪贴板"
         : role === "mac"
           ? "已放入手机可取用的收件箱"
-          : "文字已送到 Mac",
+          : "文字已送到电脑",
     );
     await refreshState();
   } catch (error) {
@@ -657,11 +677,12 @@ $("text-panel").addEventListener("submit", async (event) => {
   }
 });
 $("clipboard-send").addEventListener("click", async () => {
+  if (nativeWindows) { nativePost({ type: "clipboard" }); return; }
   $("clipboard-send").disabled = true;
   try {
     await post("/api/mac/clipboard/send");
     await refreshState();
-    toast("Mac 剪贴板文字已发送");
+    toast("电脑剪贴板文字已发送");
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -711,6 +732,10 @@ function uploadFile(file, position, total) {
   });
 }
 async function sendFiles(files) {
+  if (nativeWindows) {
+    if (files.length) window.chrome.webview.postMessageWithAdditionalObjects({ type: "files" }, files);
+    return;
+  }
   if (uploading || !files.length) return;
   uploading = true;
   $("file-input").disabled = true;
@@ -732,8 +757,8 @@ async function sendFiles(files) {
     $("upload-detail").textContent =
       role === "mac"
         ? `${complete} 个文件已暂存，手机可下载保存`
-        : `${complete} 个文件已保存到 Mac 收件目录`;
-    toast(role === "mac" ? "文件已准备好，手机可取用" : "文件已送到 Mac");
+        : `${complete} 个文件已保存到电脑收件目录`;
+    toast(role === "mac" ? "文件已准备好，手机可取用" : "文件已送到电脑");
   } catch (error) {
     $("upload-percent").textContent = "未全部完成";
     $("upload-detail").textContent =
@@ -775,6 +800,7 @@ document.addEventListener("dragover", (event) => event.preventDefault());
 document.addEventListener("drop", (event) => event.preventDefault());
 
 function listenEvents() {
+  if (nativeWindows) { listenNative(); return; }
   events?.close();
   events = new EventSource("/api/events");
   events.addEventListener("change", () =>
@@ -801,7 +827,7 @@ function showPhonePairing() {
   $("pair-submit").disabled = !pairToken;
   if (!pairToken) {
     $("pair-intro").textContent =
-      "在 Mac 的 NearBridge「设备连接」页刷新二维码，再用这台手机扫描。";
+      "在电脑的 NearBridge「设备连接」页刷新二维码，再用这台手机扫描。";
     $("pair-form").hidden = true;
   }
   setConnection("尚未配对");
@@ -810,7 +836,7 @@ async function enterWorkspace() {
   $("pair-phone").hidden = true;
   $("mobile-workspace-nav").hidden = role !== "phone";
   $("loading").hidden = true;
-  changeView("workflows");
+  changeView(nativeWindows ? "transfer" : "workflows");
   await refreshState();
   listenEvents();
 }
@@ -828,7 +854,7 @@ async function pollPair(claim) {
       return;
     }
     if (data.status === "rejected")
-      throw new Error("Mac 已拒绝请求，请刷新二维码后重试");
+      throw new Error("电脑已拒绝请求，请刷新二维码后重试");
     pairingTimer = setTimeout(() => pollPair(claim), 1500);
   } catch (error) {
     sessionStorage.removeItem("nearbridge-pair");
@@ -847,7 +873,7 @@ $("pair-form").addEventListener("submit", async (event) => {
     pairToken = null;
     sessionStorage.setItem("nearbridge-pair", JSON.stringify(claim));
     $("pair-status").hidden = false;
-    $("pair-status").textContent = "请求已发送，请在 Mac 点击「允许配对」。";
+    $("pair-status").textContent = "请求已发送，请在电脑点击「允许配对」。";
     clearTimeout(pairingTimer);
     pollPair(claim);
   } catch (error) {
@@ -856,6 +882,54 @@ $("pair-form").addEventListener("submit", async (event) => {
   }
 });
 
+let nativeListening = false;
+async function listenNative() {
+  if (nativeListening) return;
+  nativeListening = true;
+  let failures = 0;
+  while (nativeListening) {
+    try {
+      if (!snapshot?.revision) await refreshState();
+      const base = snapshot;
+      const update = await api(`/api/changes?since=${encodeURIComponent(base.revision)}&mode=delta-v1`);
+      // A manual refresh can supersede the baseline while the request waits.
+      if (snapshot === base) renderState(mergeState(base, update));
+      failures = 0;
+    } catch {
+      setConnection("正在重新连接");
+      await new Promise(resolve => setTimeout(resolve, Math.min(15000, 1000 * 2 ** Math.min(failures++, 4))));
+      await refreshState().catch(() => {});
+    }
+  }
+}
+
+if (nativeWindows) {
+  window.chrome.webview.addEventListener('message', event => {
+    const data = event.data;
+    if (data.type === 'error') toast(data.message, true);
+    if (data.type === 'actionComplete') {
+      if (data.text === $("message").value) $("message").value = '';
+      toast('电脑已确认接收，结果可在记录中查看');
+      refreshState().catch(() => {});
+    }
+    if (data.type === 'upload') {
+      $("upload-status").hidden = false; $("upload-name").textContent = data.name;
+      $("upload-progress").value = data.progress; $("upload-percent").textContent = `${data.progress}%`;
+      $("upload-detail").textContent = '正在存入待发队列，支持中断后重试';
+    }
+    if (data.type === 'queued') {
+      $("upload-percent").textContent = '已加入待发队列';
+      $("upload-detail").textContent = '等待手机保存并校验后，记录会显示“手机已收取”。';
+      refreshState().catch(() => {});
+    }
+    if (data.type === 'queue' && data.pending) toast('有操作结果尚未确认，请点窗口顶部“重试确认”。', true);
+  });
+  document.querySelector('.pairing-guide ol').innerHTML = '<li><strong>打开手机 NearBridge，点“扫码连接”</strong><p>手机和 Windows 电脑连接同一个 Wi-Fi。</p></li><li><strong>扫描此原生配对码</strong><p>证书和公钥随配对绑定，无需关闭证书验证。</p></li><li><strong>在电脑点击“允许配对”</strong><p>只确认你手边的手机，之后即可双向收发。</p></li>';
+  document.querySelector('.scope-note p').textContent = '鸿蒙端收发时请保持 NearBridge 前台运行。Windows 端关闭窗口后仍在托盘运行；电脑需保持唤醒。';
+  document.querySelector('.shortcut-builder h2').textContent = '接入 Windows 快捷方式';
+  document.querySelector('.builder-heading p').textContent = '从窗口顶部打开“快捷方式目录”，放入你选定的 .lnk，再载入并加入面板。手机只能触发已启用的 ID。';
+}
+
 async function initialize() {
   try {
     const info = await api("/api/bootstrap");
@@ -863,8 +937,8 @@ async function initialize() {
     document.body.classList.toggle("phone", role === "phone");
     $("loading").hidden = true;
     if (role === "phone") {
-      $("send-title").textContent = "发送到 Mac";
-      $("recipient-kicker").textContent = "手机 → MAC";
+      $("send-title").textContent = "发送到电脑";
+      $("recipient-kicker").textContent = "手机 → WINDOWS";
       $("footer-detail").textContent = "收发时请保持页面打开。";
     }
     if (info.authenticated) await enterWorkspace();
@@ -880,7 +954,7 @@ async function initialize() {
   } catch (error) {
     $("loading").hidden = false;
     $("loading").textContent =
-      `连接没有完成：${error.message}。请确认 Mac 上的 NearBridge 正在运行，然后刷新。`;
+      `连接没有完成：${error.message}。请确认电脑上的 NearBridge 正在运行，然后刷新。`;
     setConnection("未连接");
   }
 }

@@ -15,8 +15,8 @@ import {
 struct Index {
   // 既有状态（键名与含义不变）
   @StorageLink('paired') private paired: boolean = false;
-  @StorageLink('macName') private macName: string = '我的 Mac';
-  @StorageLink('status') private status: string = '扫码连接你的 Mac';
+  @StorageLink('macName') private macName: string = '我的电脑';
+  @StorageLink('status') private status: string = '扫码连接你的电脑';
   @StorageLink('progress') private progress: string = '';
   @StorageLink('stateJSON') @Watch('updateState') private stateJSON: string = '{"items":[],"workflows":[],"jobs":[]}';
   @StorageLink('savedJSON') private savedJSON: string = '[]';
@@ -123,7 +123,7 @@ struct Index {
         const text = this.draft;
         await BridgeClient.shared.sendText(text);
         if (this.draft === text) this.draft = '';
-        this.toast('已发到 Mac');
+        this.toast('已发到电脑');
       } finally {
         this.sendingText = false;
       }
@@ -137,7 +137,7 @@ struct Index {
       try {
         await BridgeClient.shared.runWorkflow(flow.id);
         this.doneFlow = flow.id;
-        this.toast(`已交给 Mac：${flow.name}`);
+        this.toast(`已交给电脑：${flow.name}`);
         setTimeout(() => { if (this.doneFlow === flow.id) this.doneFlow = ''; }, 1800);
       } finally {
         this.runningFlow = '';
@@ -155,7 +155,7 @@ struct Index {
   private discardAction(): void {
     this.execute(async () => {
       const choice = await this.getUIContext().getPromptAction().showDialog({
-        title: '结束重试？', message: '这不会撤销 Mac 上已经执行的操作。请先检查 Mac 的结果，之后再次点按会发起一项新操作。',
+        title: '结束重试？', message: '这不会撤销电脑上已经执行的操作。请先检查电脑的结果，之后再次点按会发起一项新操作。',
         buttons: [{ text: '保留', color: this.c().text2 }, { text: '已检查，结束重试', color: this.c().tint }]
       });
       if (choice.index === 1) BridgeClient.shared.discardPendingAction();
@@ -189,7 +189,7 @@ struct Index {
     const p = this.phase();
     if (p === 'online') return '已连接';
     if (p === 'offline') return '未连接';
-    if (p === 'waitingApproval') return '等待 Mac 允许';
+    if (p === 'waitingApproval') return '等待电脑允许';
     if (p === 'error') return '连接出错';
     return '正在连接';
   }
@@ -216,7 +216,7 @@ struct Index {
     const list = this.historyItems();
     return list.length > 0 && list[list.length - 1].id === item.id;
   }
-  /** Mac 发来、手机还没用过的最新一段文字（0 或 1 项，用 ForEach 以便内容切换时重建）。 */
+  /** 电脑发来、手机还没用过的最新一段文字（0 或 1 项，用 ForEach 以便内容切换时重建）。 */
   private freshFromMac(): BridgeItem[] {
     const list = this.sortedItems().filter((i: BridgeItem) => i.source === 'mac' && i.kind === 'text' && !i.receivedAt && !!i.text);
     return list.slice(0, 1);
@@ -245,8 +245,8 @@ struct Index {
 
   private itemMeta(item: BridgeItem): string {
     let state = '';
-    if (item.source === 'phone') state = item.kind === 'text' ? '已发到 Mac' : '已存入 Mac';
-    else if (item.kind === 'text') state = '来自 Mac';
+    if (item.source === 'phone') state = item.kind === 'text' ? '已发到电脑' : '已存入电脑';
+    else if (item.kind === 'text') state = '来自电脑';
     else if (this.isSaved(item)) state = '已收到 · 仅在 App 内';
     else state = this.autoReceive ? '等待收取' : '未收取';
     const parts: string[] = [state];
@@ -332,15 +332,15 @@ struct Index {
       .width(280).height(250)
       .onAppear(() => { setTimeout(() => { this.pulse = true; }, 80); })
 
-      Text('连接你的 Mac').fontSize(30).fontWeight(FontWeight.Bold).fontColor(this.c().text).margin({ top: 4 })
+      Text('连接你的电脑').fontSize(30).fontWeight(FontWeight.Bold).fontColor(this.c().text).margin({ top: 4 })
       Text('配对一次，以后打开就能用。').fontSize(15).fontColor(this.c().text2).margin({ top: 8 })
 
       Column() {
-        this.stepRow(1, '手机和 Mac 连同一个 Wi‑Fi')
+        this.stepRow(1, '手机和电脑连同一个 Wi‑Fi')
         Divider().color(this.c().separator).margin({ left: 36 })
-        this.stepRow(2, '在 Mac 的 NearBridge 点“显示配对码”')
+        this.stepRow(2, '在电脑的 NearBridge 打开“设备连接”')
         Divider().color(this.c().separator).margin({ left: 36 })
-        this.stepRow(3, '扫码后，在 Mac 上点“允许”')
+        this.stepRow(3, '扫码后，在电脑上点“允许”')
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 4, bottom: 4 })
@@ -357,7 +357,7 @@ struct Index {
           } else {
             Image(glyph('scan')).width(20).height(20).fillColor(Color.White)
           }
-          Text(this.busy ? '等待 Mac 允许…' : '扫码连接').fontSize(17).fontWeight(FontWeight.Medium).fontColor(Color.White)
+          Text(this.busy ? '等待电脑允许…' : '扫码连接').fontSize(17).fontWeight(FontWeight.Medium).fontColor(Color.White)
         }
       }
       .width('100%').height(54)
@@ -365,7 +365,7 @@ struct Index {
       .enabled(!this.busy)
       .onClick(() => { this.execute(async () => { await this.scan(); }); })
 
-      Text(this.busy ? '在 Mac 上点“允许”就完成了' : this.status)
+      Text(this.busy ? '在电脑上点“允许”就完成了' : this.status)
         .fontSize(13).fontColor(this.c().text3).textAlign(TextAlign.Center).maxLines(2)
         .margin({ top: 12, bottom: 4 })
     }
@@ -396,7 +396,7 @@ struct Index {
         if (this.pendingAction) { this.pendingActionCard() }
         if (this.progress || this.outgoingCount > 0) { this.transferCard() }
 
-        this.sectionTitle('快捷指令', '点一下，Mac 就开始')
+        this.sectionTitle('快捷指令', '点一下，电脑就开始')
         if (this.workflows.length === 0) {
           this.flowEmpty()
         } else {
@@ -456,7 +456,7 @@ struct Index {
     Column({ space: 10 }) {
       Row({ space: 6 }) {
         Image(glyph('laptop')).width(16).height(16).fillColor(this.c().tint)
-        Text('Mac 发来').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.c().tint)
+        Text('电脑发来').fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.c().tint)
         Blank()
         Text(timeLabel(item.createdAt)).fontSize(12).fontColor(this.c().text3)
       }
@@ -505,7 +505,7 @@ struct Index {
           .width(44).height(44).borderRadius(22).justifyContent(FlexAlign.Center).backgroundColor('#33FFFFFF')
           Blank()
           Text('照片和视频').fontSize(17).fontWeight(FontWeight.Bold).fontColor(Color.White)
-          Text('发到 Mac').fontSize(12).fontColor('#D9FFFFFF').margin({ top: 2 })
+          Text('发到电脑').fontSize(12).fontColor('#D9FFFFFF').margin({ top: 2 })
         }
         .width('100%').height('100%')
         .alignItems(HorizontalAlign.Start)
@@ -713,7 +713,7 @@ struct Index {
       }
       .margin({ bottom: 6 })
       Text('还没有快捷指令').fontSize(16).fontWeight(FontWeight.Medium).fontColor(this.c().text)
-      Text('在 Mac NearBridge 的“快捷指令”里添加并打开“手机可用”，按钮就会出现在这里。')
+      Text('在电脑 NearBridge 的“工作流”里添加并打开“手机可用”，按钮就会出现在这里。')
         .fontSize(13).fontColor(this.c().text2).textAlign(TextAlign.Center)
     }
     .width('100%')
@@ -862,7 +862,7 @@ struct Index {
         .fontSize(12).fontColor(this.c().text2).width('100%')
       Row({ space: 12 }) {
         Button('重试确认').fontColor(Color.White).backgroundColor(this.c().tint).enabled(!this.busy)
-          .onClick(() => { this.execute(async () => { const sent = await BridgeClient.shared.retryPendingAction(); if (sent && this.draft === sent) this.draft = ''; this.toast('Mac 已确认接收'); }); })
+          .onClick(() => { this.execute(async () => { const sent = await BridgeClient.shared.retryPendingAction(); if (sent && this.draft === sent) this.draft = ''; this.toast('电脑已确认接收'); }); })
         Button('结束重试').fontColor(this.c().text2).backgroundColor(Color.Transparent).enabled(!this.busy)
           .onClick(() => { this.discardAction(); })
       }
@@ -916,9 +916,9 @@ struct Index {
             this.routeCard('bt', '仅蓝牙', '无需同一 Wi‑Fi', '', glyph('bluetooth'))
           }
           .width('100%')
-          this.footnote('自动：优先使用局域网，连接不上时尝试已选的蓝牙 Mac。正在传输时保持当前线路。选择“仅蓝牙”后，所有内容只走蓝牙。')
+          this.footnote('自动：优先使用局域网，连接不上时尝试已选的蓝牙电脑。正在传输时保持当前线路。选择“仅蓝牙”后，所有内容只走蓝牙。')
           if (this.connectionMode !== 'lan') {
-            Button(this.bluetoothName ? `蓝牙 Mac：${this.bluetoothName} · 更换` : '选择蓝牙 Mac 作为备用')
+            Button(this.bluetoothName ? `蓝牙电脑：${this.bluetoothName} · 更换` : '选择蓝牙电脑作为备用')
               .fontSize(14).fontColor(this.c().tint).backgroundColor(Color.Transparent).margin({ top: 8 })
               .enabled(!this.busy).onClick(() => { this.findMacs(); })
           }
@@ -930,7 +930,7 @@ struct Index {
               Row({ space: 10 }) {
                 Column({ space: 3 }) {
                   Text('检查蓝牙连接').fontSize(16).fontColor(this.c().tint)
-                  Text(this.bluetoothCheck || '会在 Mac 留下一份 32 KB 测试文件，并检查返回手机后的内容。')
+                  Text(this.bluetoothCheck || '会在电脑留下一份 32 KB 测试文件，并检查返回手机后的内容。')
                     .fontSize(12).fontColor(this.c().text2)
                 }
                 .alignItems(HorizontalAlign.Start)
@@ -968,12 +968,12 @@ struct Index {
           .padding({ left: 16, right: 12, top: 10, bottom: 10 })
           .borderRadius(18)
           .backgroundColor(this.c().card)
-          this.footnote('Mac 发来的文件先放在 NearBridge 里，点“另存为”导出。目前只在前台收取：离开 App 会暂停，回来继续。关闭自动收取后，可在记录里逐个点“接收”。')
+          this.footnote('电脑发来的文件先放在 NearBridge 里，点“另存为”导出。目前只在前台收取：离开 App 会暂停，回来继续。关闭自动收取后，可在记录里逐个点“接收”。')
 
           this.groupTitle('从其他 App 发送')
           Column({ space: 6 }) {
-            Text('在图库或文件管理里点“分享”，选择“发送到 Mac”。').fontSize(15).fontColor(this.c().text)
-            Text('在分享页点一下“发送到 Mac”即可，照片、文件、文字都行。').fontSize(13).fontColor(this.c().text2)
+            Text('在图库或文件管理里点“分享”，选择“发送到电脑”。').fontSize(15).fontColor(this.c().text)
+            Text('在分享页点一下“发送到电脑”即可，照片、文件、文字都行。').fontSize(13).fontColor(this.c().text2)
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
@@ -985,7 +985,7 @@ struct Index {
           Row({ space: 10 }) {
             Column({ space: 3 }) {
               Text('重新扫码连接').fontSize(16).fontColor(this.c().tint)
-              Text('换了 Mac 或配对失效时使用；需要在 Mac 上点“允许”。').fontSize(12).fontColor(this.c().text2)
+              Text('换了电脑或配对失效时使用；需要在电脑上点“允许”。').fontSize(12).fontColor(this.c().text2)
             }
             .alignItems(HorizontalAlign.Start)
             .layoutWeight(1)
@@ -1061,7 +1061,7 @@ struct Index {
   @Builder peerList() {
     Column() {
       Row({ space: 8 }) {
-        Text('附近的 Mac').fontSize(13).fontColor(this.c().text2)
+        Text('附近的电脑').fontSize(13).fontColor(this.c().text2)
         if (this.scanningPeers) { LoadingProgress().width(16).height(16).color(this.c().text2) }
         Blank()
         if (!this.scanningPeers) {
@@ -1075,7 +1075,7 @@ struct Index {
       .padding({ left: 16, right: 8, top: 10, bottom: 4 })
 
       if (!this.scanningPeers && this.bluetoothPeers.length === 0) {
-        Text('没找到 Mac。请在 Mac NearBridge 的“手机”页打开“允许手机用蓝牙连接”，再点“重新查找”。')
+        Text('没找到电脑。请在 Windows NearBridge 窗口顶部点“开启蓝牙”，再点“重新查找”。')
           .fontSize(13).fontColor(this.c().text2).width('100%')
           .padding({ left: 16, right: 16, bottom: 14 })
       }
@@ -1096,7 +1096,7 @@ struct Index {
           this.execute(async () => {
             await BridgeClient.shared.useBluetoothDevice(peer.id, peer.name, this.connectionMode === 'auto');
             this.bluetoothListed = false;
-            this.toast(`已选择蓝牙 Mac：${peer.name}`);
+            this.toast(`已选择蓝牙电脑：${peer.name}`);
           });
         })
       }, (peer: BluetoothPeer) => peer.id)

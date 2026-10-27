@@ -4,11 +4,13 @@ import { randomUUID } from "node:crypto";
 import { ActionLedger } from "./actions.mjs";
 
 export function safeFilename(value) {
-  const name = String(value)
+  let name = String(value)
     .normalize("NFC")
-    .replace(/[\\/\x00-\x1f\x7f:]/g, "_")
+    .replace(/[\\/\x00-\x1f\x7f:<>"|?*]/g, "_")
     .replace(/^\.+/, "")
-    .trim();
+    .trim()
+    .replace(/[. ]+$/, "");
+  if (/^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/i.test(name)) name = `_${name}`;
   // Filesystems limit bytes, not JS characters. Leave room for collision suffixes.
   const truncate = (text, limit) => {
     let result = "", bytes = 0;
@@ -95,7 +97,13 @@ export class Store {
     let filename = clean;
     for (let suffix = 1; ; suffix++) {
       try {
-        fs.linkSync(temp, path.join(root, filename));
+        const target = path.join(root, filename);
+        try { fs.linkSync(temp, target); }
+        catch (error) {
+          // Redirected Windows Downloads folders can be on another volume.
+          if (!["EXDEV", "ENOTSUP", "EPERM"].includes(error.code)) throw error;
+          fs.copyFileSync(temp, target, fs.constants.COPYFILE_EXCL);
+        }
         break;
       } catch (error) {
         if (error.code !== "EEXIST") throw error;

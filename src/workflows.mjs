@@ -6,7 +6,7 @@ const builtins = [
   {
     id: "open-inbox",
     name: "打开收件目录",
-    description: "让 Mac 在访达中打开 NearBridge 收件目录。",
+    description: "在电脑文件管理器中打开 NearBridge 收件目录。",
     type: "builtin",
     enabled: true,
     symbol: "↗",
@@ -15,7 +15,7 @@ const builtins = [
     id: "save-note",
     name: "把刚发来的文字存成便签",
     description:
-      "把这台手机最近发来的文字存为 Markdown 文件，放进 Mac 收件目录。",
+      "把这台手机最近发来的文字存为 Markdown 文件，放进电脑收件目录。",
     type: "builtin",
     enabled: true,
     symbol: "T",
@@ -39,7 +39,7 @@ export class WorkflowManager {
     for (const job of this.store.data.jobs)
       if (job.status === "running") {
         job.status = "interrupted";
-        job.message = "服务已重启，请先检查 Mac 上的执行结果再决定是否重试。";
+        job.message = "服务已重启，请先检查电脑上的执行结果再决定是否重试。";
         changed = true;
       }
     if (changed) this.store.save();
@@ -68,7 +68,7 @@ export class WorkflowManager {
       id: key,
       shortcutId: shortcut.id,
       name: shortcut.name,
-      description: "由 Mac 端选定的快捷指令。手机点按后直接在 Mac 执行。",
+      description: "由电脑端选定的快捷指令。手机点按后直接在电脑执行。",
       type: "shortcut",
       enabled: true,
       symbol: "⌘",
@@ -96,7 +96,7 @@ export class WorkflowManager {
     if (action?.existing) {
       return this.store.data.jobs.find(job => job.id === action.existing.resultId) || {
         id: action.existing.resultId, workflowId: id, status: "accepted",
-        message: "Mac 已接收这项操作，执行记录已移出历史；不会重复执行。",
+        message: "电脑已接收这项操作，执行记录已移出历史；不会重复执行。",
       };
     }
     const existing = this.store.data.jobs.find(
@@ -118,8 +118,8 @@ export class WorkflowManager {
     const workflow = this.store.data.workflows.find(
       (value) => value.id === id && value.enabled,
     );
-    if (!workflow) throw fail(403, "这个工作流未在 Mac 启用");
-    if (this.active) throw fail(409, "Mac 正在执行另一个工作流，请完成后再试");
+    if (!workflow) throw fail(403, "这个工作流未在电脑启用");
+    if (this.active) throw fail(409, "电脑正在执行另一个工作流，请完成后再试");
     const job = {
       id: randomUUID(),
       requestId,
@@ -128,7 +128,7 @@ export class WorkflowManager {
       peerId,
       source: role,
       status: "running",
-      message: "正在 Mac 上执行…",
+      message: "正在电脑上执行…",
       createdAt: new Date().toISOString(),
     };
     const before = this.store.data.jobs;
@@ -147,7 +147,7 @@ export class WorkflowManager {
         job.status = "failed";
         job.message = error.status
           ? error.message
-          : "执行未完成。请检查 Mac 的权限或确认窗口；重试前先确认是否已有部分结果。";
+          : "执行未完成。请检查电脑的权限或确认窗口；重试前先确认是否已有部分结果。";
       })
       .finally(() => {
         job.finishedAt = new Date().toISOString();
@@ -163,7 +163,7 @@ export class WorkflowManager {
   async execute(workflow, job, signal) {
     if (workflow.id === "open-inbox") {
       await this.system.openInbox(this.store.inbox);
-      return "已请求 Mac 打开收件目录。";
+      return "已请求电脑打开收件目录。";
     }
     if (workflow.id === "save-note") {
       const text = this.store.data.items.find(
@@ -203,7 +203,7 @@ export class WorkflowManager {
       /^[a-f0-9-]{36}$/i.test(workflow.shortcutId)
     ) {
       await this.system.runShortcut(workflow.shortcutId, signal);
-      return "快捷指令已结束。具体结果以 Mac 上的快捷指令行为为准。";
+      return process.platform === "win32" ? "已请求 Windows 启动快捷方式。后续结果请在电脑确认。" : "快捷指令已结束。具体结果以电脑上的快捷指令行为为准。";
     }
     throw fail(403, "这个工作流不受支持");
   }
