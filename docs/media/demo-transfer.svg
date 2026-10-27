@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="960" viewBox="0 0 1600 960" role="img" aria-labelledby="title desc">
+  <title id="title">NearBridge 文件互传场景示意</title>
+  <desc id="desc">手机通过系统分享选中旅行笔记.pdf，确认目标为书桌上的 Mac，发送后电脑收件记录显示已收到。全图使用演示数据，不是真机截图。</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#182c54" flood-opacity=".09"/></filter>
+    <linearGradient id="blue" x2="1" y2="1"><stop stop-color="#5398ff"/><stop offset="1" stop-color="#2463eb"/></linearGradient>
+    <style>text{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;fill:#172033}.muted{fill:#667185}.blue{fill:#2463eb}.white{fill:white}.small{font-size:21px}.body{font-size:25px}.bold{font-weight:600}</style>
+  </defs>
+  <rect width="1600" height="960" rx="28" fill="#f5f7fb"/>
+  <text x="70" y="66" class="small blue bold" letter-spacing="2">NEARBRIDGE / 01</text>
+  <text x="70" y="143" font-size="58" font-weight="700">文件不用绕路。</text>
+  <text x="70" y="192" font-size="28" class="muted">照片、文档、文字，从分享面板直接到电脑。</text>
+  <text x="1530" y="67" text-anchor="end" class="small muted">HarmonyOS ↔ Mac / Windows</text>
+  <g filter="url(#shadow)">
+    <rect x="83" y="245" width="380" height="630" rx="47" fill="#18202e"/>
+    <rect x="91" y="253" width="364" height="614" rx="40" fill="#fff"/>
+  </g>
+  <rect x="232" y="267" width="82" height="6" rx="3" fill="#d7dce5"/>
+  <text x="122" y="327" font-size="29" font-weight="700">发送到电脑</text>
+  <text x="424" y="325" text-anchor="end" font-size="24" class="muted">取消</text>
+  <text x="122" y="376" class="small muted">发送目标</text>
+  <rect x="115" y="393" width="316" height="83" rx="18" fill="#edf3ff"/>
+  <g fill="none" stroke="#2463eb" stroke-width="2.5"><rect x="132" y="416" width="39" height="28" rx="4"/><path d="M127 451h49"/></g>
+  <text x="188" y="428" class="body bold">书桌上的 Mac</text>
+  <text x="188" y="457" class="small blue">当前电脑</text>
+  <path d="m400 428 7 7-7 7" fill="none" stroke="#2463eb" stroke-width="2.5"/>
+  <text x="122" y="524" class="small muted">已选内容 · 1 个文件</text>
+  <rect x="115" y="545" width="316" height="123" rx="18" fill="#f6f7fa"/>
+  <g transform="translate(134 570)"><rect width="47" height="60" rx="9" fill="#e4ecff"/><path d="M14 19h20M14 28h20M14 37h14" fill="none" stroke="#2463eb" stroke-width="3" stroke-linecap="round"/></g>
+  <text x="199" y="595" font-size="23" font-weight="600">旅行笔记.pdf</text>
+  <text x="199" y="628" class="small muted">2.4 MB · 原文件</text>
+  <rect x="115" y="719" width="316" height="60" rx="18" fill="#2463eb"/>
+  <text x="273" y="758" text-anchor="middle" font-size="25" class="white bold">发送</text>
+  <text x="273" y="819" text-anchor="middle" font-size="19" class="muted">确认目标后，直接发送。</text>
+  <rect x="215" y="847" width="116" height="5" rx="2.5" fill="#cbd1da"/>
+  <path d="M493 554h132m-15-14 15 14-15 14" fill="none" stroke="#2463eb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="558" y="592" text-anchor="middle" class="small blue">本地直传</text>
+  <g filter="url(#shadow)"><rect x="665" y="297" width="866" height="507" rx="23" fill="white"/></g>
+  <path d="M688 297h820a23 23 0 0 1 23 23v29H665v-29a23 23 0 0 1 23-23" fill="#f0f2f7"/>
+  <circle cx="694" cy="323" r="6" fill="#c6cdd8"/><circle cx="715" cy="323" r="6" fill="#c6cdd8"/><circle cx="736" cy="323" r="6" fill="#c6cdd8"/>
+  <text x="1098" y="331" text-anchor="middle" font-size="20" class="muted">NearBridge</text>
+  <path d="M665 349h209v455H688a23 23 0 0 1-23-23z" fill="#f5f6f9"/>
+  <text x="690" y="400" class="small bold">我的手机</text>
+  <circle cx="697" cy="431" r="5" fill="#2463eb"/><text x="711" y="439" font-size="19" class="muted">已连接</text>
+  <rect x="683" y="473" width="173" height="49" rx="11" fill="#2463eb"/>
+  <text x="705" y="505" class="small white bold">↑↓  互传</text>
+  <text x="705" y="565" class="small muted">ϟ   快捷指令</text>
+  <text x="690" y="765" font-size="17" class="muted">加密直连 · 0.8.0</text>
+  <text x="910" y="413" font-size="35" font-weight="700">互传</text>
+  <text x="910" y="454" class="small muted">文件、文字，都在这里。</text>
+  <line x1="910" y1="481" x2="1492" y2="481" stroke="#e8ecf3"/>
+  <text x="910" y="521" font-size="19" class="muted">来自手机</text>
+  <rect x="910" y="544" width="582" height="118" rx="17" fill="#f5f7fb"/>
+  <rect x="932" y="566" width="58" height="72" rx="10" fill="url(#blue)"/>
+  <path d="M949 588h24M949 599h24M949 610h17" fill="none" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <text x="1015" y="590" font-size="28" font-weight="600">旅行笔记.pdf</text>
+  <text x="1015" y="631" class="small muted">2.4 MB</text>
+  <text x="1469" y="630" text-anchor="end" class="small blue">打开文件</text>
+  <path d="m921 707 8 8 16-18" fill="none" stroke="#2463eb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="958" y="716" class="small blue">电脑已收到 · SHA-256 校验一致</text>
+  <text x="910" y="762" font-size="19" class="muted">电脑发给手机，也会在保存并校验后显示收取回执。</text>
+  <text x="70" y="924" font-size="19" class="muted">功能场景示意 · 使用演示数据，非真机截图</text>
+  <text x="1530" y="924" text-anchor="end" font-size="19" class="muted">传输期间保持手机 NearBridge 在前台</text>
+</svg>

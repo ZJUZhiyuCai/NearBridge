@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="960" viewBox="0 0 1600 960" role="img" aria-labelledby="title desc">
+  <title id="title">NearBridge 多电脑切换与手机工作流场景示意</title>
+  <desc id="desc">手机保存 Mac 和 Windows 两台电脑，选中 Mac 后点打开收件目录。当前电脑执行已启用的动作并返回成功记录。图为功能示意，使用演示数据。</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#182c54" flood-opacity=".08"/></filter>
+    <linearGradient id="blue" x2="1" y2="1"><stop stop-color="#55a0ff"/><stop offset="1" stop-color="#2463eb"/></linearGradient>
+    <style>text{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;fill:#172033}.muted{fill:#667185}.blue{fill:#2463eb}.white{fill:white}.small{font-size:21px}.body{font-size:25px}.bold{font-weight:600}</style>
+  </defs>
+  <rect width="1600" height="960" rx="28" fill="#f5f7fb"/>
+  <text x="70" y="66" class="small blue bold" letter-spacing="2">NEARBRIDGE / 02</text>
+  <text x="70" y="143" font-size="58" font-weight="700">手机点一下，电脑就行动。</text>
+  <text x="70" y="192" font-size="28" class="muted">选好目标，运行电脑上已启用的快捷指令。</text>
+  <text x="1530" y="67" text-anchor="end" class="small muted">一部手机 · 多台电脑</text>
+  <g filter="url(#shadow)"><rect x="90" y="244" width="417" height="634" rx="48" fill="#18202e"/><rect x="98" y="252" width="401" height="618" rx="41" fill="white"/></g>
+  <rect x="257" y="266" width="82" height="6" rx="3" fill="#d7dce5"/>
+  <text x="129" y="330" font-size="29" font-weight="700">NearBridge</text>
+  <text x="467" y="326" text-anchor="end" font-size="28" class="muted">···</text>
+  <text x="129" y="377" class="small muted">当前电脑</text>
+  <rect x="122" y="394" width="353" height="89" rx="18" fill="#edf3ff"/>
+  <g fill="none" stroke="#2463eb" stroke-width="2.5"><rect x="141" y="416" width="40" height="29" rx="4"/><path d="M136 453h50"/></g>
+  <text x="198" y="432" class="body bold">书桌上的 Mac</text>
+  <text x="198" y="462" class="small blue">已连接</text>
+  <path d="m440 431 7 7-7 7" fill="none" stroke="#2463eb" stroke-width="2.5"/>
+  <text x="129" y="536" font-size="28" font-weight="700">快捷指令</text>
+  <text x="129" y="573" font-size="19" class="muted">运行当前电脑已启用的动作</text>
+  <rect x="122" y="597" width="353" height="99" rx="18" fill="#2463eb"/>
+  <g fill="none" stroke="white" stroke-width="2.5"><path d="M143 627h15l7 7h26v28h-48z" stroke-linejoin="round"/><path d="M143 635h48"/></g>
+  <text x="210" y="641" class="body white bold">打开收件目录</text>
+  <text x="210" y="674" font-size="19" class="white">点一下，在电脑上打开</text>
+  <rect x="122" y="714" width="353" height="93" rx="18" fill="#f5f6fa"/>
+  <path d="M151 734h30v49h-30zM158 746h16M158 754h16M158 762h11" fill="none" stroke="#68758b" stroke-width="2.5" stroke-linejoin="round"/>
+  <text x="210" y="752" font-size="23" class="bold">保存文字便签</text>
+  <text x="210" y="784" font-size="19" class="muted">把刚发来的文字存成便签</text>
+  <rect x="241" y="849" width="116" height="5" rx="2.5" fill="#cbd1da"/>
+  <line x1="620" y1="336" x2="620" y2="739" stroke="#dae4f7" stroke-width="2"/>
+  <circle cx="620" cy="331" r="23" fill="#2463eb"/><text x="620" y="339" text-anchor="middle" font-size="21" class="white bold">1</text>
+  <text x="665" y="341" font-size="30" font-weight="700">先选电脑</text>
+  <text x="665" y="381" class="small muted">配对一起保留，每次收发有明确目标。</text>
+  <rect x="665" y="408" width="389" height="83" rx="17" fill="white" stroke="#2463eb" stroke-width="2"/>
+  <text x="689" y="443" class="body bold">书桌上的 Mac</text>
+  <text x="689" y="474" font-size="19" class="blue">当前电脑</text>
+  <circle cx="1020" cy="448" r="12" fill="#2463eb"/><path d="m1014 448 4 4 8-9" fill="none" stroke="white" stroke-width="2"/>
+  <rect x="1074" y="408" width="389" height="83" rx="17" fill="white" stroke="#e1e6ef"/>
+  <text x="1098" y="443" class="body bold">工作用 Windows</text>
+  <text x="1098" y="474" font-size="19" class="muted">已保存 · 可切换</text>
+  <circle cx="620" cy="554" r="23" fill="#2463eb"/><text x="620" y="562" text-anchor="middle" font-size="21" class="white bold">2</text>
+  <text x="665" y="564" font-size="30" font-weight="700">再点指令</text>
+  <text x="665" y="607" class="small muted">Mac 使用本机 Shortcuts，Windows 使用本机 .lnk。</text>
+  <text x="665" y="642" class="small muted">自定义动作先在电脑端明确启用，再交给手机运行。</text>
+  <circle cx="620" cy="720" r="23" fill="#2463eb"/><text x="620" y="728" text-anchor="middle" font-size="21" class="white bold">3</text>
+  <text x="665" y="730" font-size="30" font-weight="700">电脑执行，结果有记录</text>
+  <rect x="665" y="759" width="798" height="95" rx="18" fill="white" filter="url(#shadow)"/>
+  <rect x="688" y="779" width="56" height="56" rx="15" fill="url(#blue)"/>
+  <path d="M701 796h11l5 5h15v20h-31z" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
+  <text x="765" y="800" class="body bold">打开收件目录</text>
+  <text x="765" y="833" font-size="19" class="muted">来自手机 · 当前目标：书桌上的 Mac</text>
+  <text x="1436" y="815" text-anchor="end" class="small blue bold">✓ 执行成功</text>
+  <text x="70" y="924" font-size="19" class="muted">功能场景示意 · 使用演示数据，非真机截图</text>
+  <text x="1530" y="924" text-anchor="end" font-size="19" class="muted">电脑保持唤醒 · 手机保持前台</text>
+</svg>
